@@ -1,0 +1,13 @@
+# Local build outputs / scratch artifacts
+/drover-code
+/claude-go
+/design/claude-go
+/out.json
+
+# Go build cache outputs (when run outside module root)
+*.exe
+*.test
+*.out
+
+# macOS
+.DS_Store

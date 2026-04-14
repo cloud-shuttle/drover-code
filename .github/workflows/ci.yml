@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Test (unit + property tests via testing/quick)
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./...
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+        run: go build -o /tmp/drover-code ./cmd/drover-code
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Fuzz (30s per target)
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -e
+          run_fuzz() {
+            echo "== $1 =="
+            # -timeout must exceed -fuzztime so the coordinator can stop workers
+            # cleanly (avoids "context deadline exceeded" on some platforms).
+            go test -timeout=120s ./"$2" -fuzz="$3" -fuzztime=30s -fuzzminimizetime=5s
+          }
+          run_fuzz api internal/api FuzzStreamNext
+          run_fuzz safepath internal/tools/toolutil FuzzSafePath
+          run_fuzz extractJSON internal/coordinator FuzzExtractJSON
+          run_fuzz parseWebhook internal/github FuzzParseWebhook
+          run_fuzz extractMention internal/github FuzzExtractMention
+          run_fuzz mergeInto internal/config FuzzMergeInto
+          run_fuzz parseCLIFlags cmd/drover-code FuzzParseCLIFlags
+          run_fuzz convo internal/convo FuzzConvoManager
+          run_fuzz registryExecute internal/tools FuzzRegistryExecute
+          run_fuzz undercoverDomain internal/undercover FuzzIsInternalDomain
+          run_fuzz tuiPermPrompt internal/tui FuzzModel_permissionPromptKeys
+          run_fuzz tuiPermBatch internal/tui FuzzModel_permissionBatchKeys
