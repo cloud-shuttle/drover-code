@@ -30,6 +30,27 @@ export ANTHROPIC_API_KEY=sk-ant-...
 echo "Summarise the README" | ANTHROPIC_API_KEY=sk-ant-... ./drover-code
 ```
 
+### Headless for Unikraft / unikernel workers
+
+Headless mode is designed to run as a **non-interactive batch worker** (no TTY, no permission prompts), e.g. one job per **Unikraft unikernel** instance.
+
+- **Activation**: set `DROVER_CODE_HEADLESS=1` (recommended) or rely on non-TTY stdin.
+- **Permissions preset**: set `DROVER_CODE_PERMISSION_PRESET=unikernel` to run with an allowlist-oriented policy intended for isolated workers.
+- **Machine output**: pipe/redirect stdout (non-TTY) or set `DROVER_CODE_JSONL=1` to force JSON Lines events. Set `DROVER_CODE_HEADLESS_PLAIN=1` to force plain text instead.
+- **Completion artifact**: set `DROVER_CODE_RESULT_PATH=/path/to/result.json` (or pass `--result-json /path/to/result.json`) to write a final structured result on exit.
+
+Example (one-shot prompt via stdin, JSONL output + result file):
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export DROVER_CODE_HEADLESS=1
+export DROVER_CODE_PERMISSION_PRESET=unikernel
+export DROVER_CODE_JSONL=1
+export DROVER_CODE_RESULT_PATH=/tmp/drover-code-result.json
+
+echo "Run unit tests and summarise failures." | ./drover-code
+```
+
 **Model** — default is baked into the binary; override with:
 
 ```bash
