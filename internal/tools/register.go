@@ -3,12 +3,14 @@
 package tools
 
 import (
+	"fmt"
 	"os"
 
 	fspkg "github.com/cloudshuttle/drover-code/internal/tools/fs"
 	gitpkg "github.com/cloudshuttle/drover-code/internal/tools/git"
 	searchpkg "github.com/cloudshuttle/drover-code/internal/tools/search"
 	shellpkg "github.com/cloudshuttle/drover-code/internal/tools/shell"
+	ukcpkg "github.com/cloudshuttle/drover-code/internal/tools/ukc"
 	webpkg "github.com/cloudshuttle/drover-code/internal/tools/web"
 )
 
@@ -45,5 +47,23 @@ func RegisterAll(r *Registry, workDir string) {
 
 	// ── Web ──────────────────────────────────────────────────────────────────
 	r.Register(webpkg.NewFetch())
+
+	// ── Unikraft Cloud (optional; requires UKC_TOKEN) ─────────────────────────
+	registerUKCTools(r)
 }
 
+func registerUKCTools(r *Registry) {
+	mgr, ok, err := ukcpkg.NewManagerFromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: ukc tools disabled: %v\n", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	r.Register(&ukcpkg.Create{M: mgr})
+	r.Register(&ukcpkg.Exec{M: mgr})
+	r.Register(&ukcpkg.Delete{M: mgr})
+	r.Register(&ukcpkg.DeleteAll{M: mgr})
+	r.Register(&ukcpkg.List{M: mgr})
+}

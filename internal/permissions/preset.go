@@ -28,6 +28,11 @@ var unikernelAllowTools = []string{
 	"git_commit",
 	"git_create_branch",
 	"web_fetch",
+	"ukc_create",
+	"ukc_exec",
+	"ukc_delete",
+	"ukc_delete_all",
+	"ukc_list",
 }
 
 // unikernelDenyTools is always denied for the unikernel preset unless the
