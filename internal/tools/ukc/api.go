@@ -53,6 +53,7 @@ type createInstanceBody struct {
 }
 
 type createInstanceServiceGroup struct {
+	Name     string       `json:"name,omitempty"`
 	Services []apiService `json:"services"`
 }
 
@@ -117,6 +118,7 @@ func CreateInstance(ctx context.Context, cfg Config, name, image string, memoryM
 		Metro:     metro,
 		Autostart: true,
 		ServiceGroup: &createInstanceServiceGroup{
+			Name: name + "-sg",
 			Services: []apiService{{
 				Port:            443,
 				DestinationPort: agentListenPort,
@@ -208,15 +210,29 @@ func DeleteInstance(ctx context.Context, cfg Config, uuid string) error {
 
 // InstanceHTTPSURL returns a public HTTPS base URL for health and agent calls.
 func InstanceHTTPSURL(inst apiInstance) string {
-	if inst.FQDN != "" {
-		return "https://" + strings.TrimSuffix(inst.FQDN, ".")
-	}
+	// If the API returns the Service Group domain directly, use it!
 	if inst.ServiceGroup != nil && len(inst.ServiceGroup.Domains) > 0 {
 		host := strings.TrimSpace(inst.ServiceGroup.Domains[0].FQDN)
 		host = strings.TrimSuffix(host, ".")
 		if host != "" {
 			return "https://" + host
 		}
+	}
+	
+	// If it doesn't return the Service Group domain, we can compute it!
+	// We named the Service Group: inst.Name + "-sg"
+	// We can get the base domain from inst.FQDN (e.g. wispy-violet.syd0-plausible-gnu.unikraft.app -> .syd0-plausible-gnu.unikraft.app)
+	if inst.FQDN != "" && inst.Name != "" {
+		idx := strings.Index(inst.FQDN, ".")
+		if idx != -1 {
+			baseDomain := inst.FQDN[idx:] // e.g. ".syd0-plausible-gnu.unikraft.app"
+			return fmt.Sprintf("https://%s-sg%s", inst.Name, baseDomain)
+		}
+	}
+	
+	// Fallback (will probably 404 since port 443 is on the SG, not the instance)
+	if inst.FQDN != "" {
+		return "https://" + strings.TrimSuffix(inst.FQDN, ".")
 	}
 	if inst.Name != "" && inst.Metro != "" {
 		return fmt.Sprintf("https://%s.%s0.unikraft.app", inst.Name, inst.Metro)
