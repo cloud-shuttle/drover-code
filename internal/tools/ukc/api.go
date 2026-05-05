@@ -105,6 +105,10 @@ func CreateInstance(ctx context.Context, cfg Config, name, image string, memoryM
 	if metro == "" {
 		metro = "fra"
 	}
+	// If the metro is actually a full URL, do not send the metro field in the JSON payload
+	if strings.HasPrefix(metro, "http://") || strings.HasPrefix(metro, "https://") {
+		metro = ""
+	}
 	body := createInstanceBody{
 		Name:      name,
 		Image:     image,
