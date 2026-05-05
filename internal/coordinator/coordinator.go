@@ -126,11 +126,19 @@ Task: %s`, task)
 		if e, ok := stream.Event().(api.ContentBlockDeltaEvent); ok {
 			if td, ok := e.Delta.(api.TextDelta); ok {
 				raw.WriteString(td.Text)
+				select {
+				case c.eventCh <- agent.TextDeltaEvent{Text: td.Text}:
+				default:
+				}
 			}
 		}
 	}
 	if stream.Err() != nil {
 		return nil, stream.Err()
+	}
+	select {
+	case c.eventCh <- agent.TextDeltaEvent{Text: "\n"}:
+	default:
 	}
 
 	jsonStr := extractJSON(raw.String())
