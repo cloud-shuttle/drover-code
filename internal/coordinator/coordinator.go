@@ -72,10 +72,11 @@ func (c *Coordinator) Execute(ctx context.Context, task string) (string, error) 
 	return out.Summary, err
 }
 
-// ExecuteWithResults runs decompose → workers → synthesise and returns the
-// final summary plus each worker’s output.
 func (c *Coordinator) ExecuteWithResults(ctx context.Context, task string) (ExecuteOutcome, error) {
 	var z ExecuteOutcome
+	
+	c.eventCh <- agent.TextDeltaEvent{Text: "Decomposing task into subtasks via Anthropic API...\n"}
+	
 	subtasks, err := c.decompose(ctx, task)
 	if err != nil {
 		return z, fmt.Errorf("coordinator: decompose: %w", err)
