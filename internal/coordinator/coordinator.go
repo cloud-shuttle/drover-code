@@ -350,13 +350,21 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 			if err := json.Unmarshal([]byte(payload), &m); err != nil {
 				return
 			}
-			typ, _ := m["type"].(string)
+			lineStr, ok := m["line"].(string)
+			if !ok {
+				return
+			}
+			var ev map[string]any
+			if err := json.Unmarshal([]byte(lineStr), &ev); err != nil {
+				return
+			}
+			typ, _ := ev["type"].(string)
 			switch typ {
 			case "tool_start":
-				name, _ := m["name"].(string)
+				name, _ := ev["name"].(string)
 				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🔨 using tool: %s\n", st.Index+1, name)}
 			case "heartbeat":
-				turn, _ := m["turn"].(float64)
+				turn, _ := ev["turn"].(float64)
 				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🧠 thinking... (turn %d)\n", st.Index+1, int(turn))}
 			}
 		}

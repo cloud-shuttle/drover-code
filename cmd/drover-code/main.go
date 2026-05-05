@@ -432,7 +432,6 @@ func runCoordinatorMode(
 				coordMgr.Append(api.UserMessage("Coordinator error: " + err.Error()))
 			}
 		} else {
-			fmt.Println(out.Summary)
 			if coordMgr != nil {
 				coordMgr.Append(api.UserMessage(input))
 				text := formatCoordinatorDreamTurn(out)
