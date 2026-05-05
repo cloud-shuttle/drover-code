@@ -415,7 +415,13 @@ func runCoordinatorMode(
 			prompt()
 			continue
 		}
+		if strings.ToLower(input) == "/quit" || strings.ToLower(input) == "exit" {
+			break
+		}
 		out, err := coord.ExecuteWithResults(ctx, input)
+		if ctx.Err() != nil {
+			break
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "coordinator error:", err)
 			if coordMgr != nil {
