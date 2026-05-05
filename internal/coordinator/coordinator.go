@@ -280,13 +280,21 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
 	}
 
+	instURL := ukc.InstanceHTTPSURL(inst)
+	if instURL == "" {
+		// Cleanup the instance if we couldn't get a URL
+		_ = ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "Could not determine public HTTPS URL for Unikraft instance"}, fmt.Errorf("empty instance URL")
+	}
+
+	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance created, waiting for health check at %s...\n", st.Index+1, instURL)}
+
 	// Always cleanup
 	defer func() {
 		_ = ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
 		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
 	}()
 
-	instURL := ukc.InstanceHTTPSURL(inst)
 	if err := ukc.WaitForHealth(ctx, cfg.HTTPClient, instURL, token, cfg.MaxHealthWait); err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "instance health timeout: " + err.Error()}, err
 	}

@@ -73,9 +73,11 @@ type createInstanceResponse struct {
 type apiInstance struct {
 	UUID         string           `json:"uuid"`
 	Name         string           `json:"name"`
+	State        string           `json:"state"`
 	Metro        string           `json:"metro"`
 	ServiceGroup *apiServiceGroup `json:"service_group"`
 	PrivateFQDN  string           `json:"private_fqdn"`
+	FQDN         string           `json:"fqdn"`
 }
 
 type apiServiceGroup struct {
@@ -206,6 +208,9 @@ func DeleteInstance(ctx context.Context, cfg Config, uuid string) error {
 
 // InstanceHTTPSURL returns a public HTTPS base URL for health and agent calls.
 func InstanceHTTPSURL(inst apiInstance) string {
+	if inst.FQDN != "" {
+		return "https://" + strings.TrimSuffix(inst.FQDN, ".")
+	}
 	if inst.ServiceGroup != nil && len(inst.ServiceGroup.Domains) > 0 {
 		host := strings.TrimSpace(inst.ServiceGroup.Domains[0].FQDN)
 		host = strings.TrimSuffix(host, ".")
