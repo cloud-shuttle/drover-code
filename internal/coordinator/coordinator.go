@@ -275,7 +275,20 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 	// Create instance
 	token, _ := ukc.RandToken()
 	cfg := mgr.Config()
-	inst, err := ukc.CreateInstance(ctx, cfg, name, cfg.DefaultImage, 512, map[string]string{"AGENT_TOKEN": token})
+	env := map[string]string{
+		"AGENT_TOKEN": token,
+	}
+	// Forward LLM API keys and configuration to the remote workers
+	for _, k := range []string{
+		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
+		"ANTHROPIC_MODEL", "OPENAI_MODEL", "GEMINI_MODEL",
+	} {
+		if v := os.Getenv(k); v != "" {
+			env[k] = v
+		}
+	}
+
+	inst, err := ukc.CreateInstance(ctx, cfg, name, cfg.DefaultImage, 512, env)
 	if err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
 	}
