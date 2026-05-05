@@ -62,6 +62,12 @@ func (m *Manager) persistLocked() error {
 	return saveRegistry(m.regPath, m.entries)
 }
 
+func (m *Manager) Config() Config {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cfg
+}
+
 // RandToken returns a random 32-byte hex token for AGENT_TOKEN.
 func RandToken() (string, error) {
 	var b [16]byte

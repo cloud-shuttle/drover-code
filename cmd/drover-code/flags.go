@@ -9,8 +9,9 @@ import (
 type cliFlags struct {
 	Headless    bool
 	Prompt      string
-	PromptFile  string
-	ResultJSON  string
+	PromptFile        string
+	ResultJSON        string
+	CoordinatorRemote bool
 }
 
 // parseCLIFlags extracts known flags from argv. Unknown tokens are ignored so
@@ -22,6 +23,8 @@ func parseCLIFlags(argv []string) (cliFlags, error) {
 		switch {
 		case a == "--headless":
 			f.Headless = true
+		case a == "--coordinator-remote":
+			f.CoordinatorRemote = true
 		case a == "-p" || a == "--prompt":
 			if i+1 >= len(argv) {
 				return f, fmt.Errorf("%s: value required", a)

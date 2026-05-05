@@ -52,3 +52,4 @@ jobs:
           run_fuzz undercoverDomain internal/undercover FuzzIsInternalDomain
           run_fuzz tuiPermPrompt internal/tui FuzzModel_permissionPromptKeys
           run_fuzz tuiPermBatch internal/tui FuzzModel_permissionBatchKeys
+          run_fuzz parseExecStream internal/tools/ukc FuzzParseExecStream

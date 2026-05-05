@@ -55,6 +55,9 @@ func main() {
 
 	cfg := loadConfig(workDir)
 	settings := cfg.Get()
+	if startupFlags.CoordinatorRemote {
+		settings.CoordinatorRemote = true
+	}
 
 	modelStr := coalesce(os.Getenv("ANTHROPIC_MODEL"), settings.Model, defaultModel)
 

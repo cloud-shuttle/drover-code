@@ -32,9 +32,14 @@ func ReadExecStream(ctx context.Context, client *http.Client, streamURL, token s
 		return "", 0, fmt.Errorf("stream: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
+	return ParseExecStream(resp.Body)
+}
+
+// ParseExecStream parses SSE events from an io.Reader.
+func ParseExecStream(r io.Reader) (string, int, error) {
 	var out strings.Builder
 	code := 0
-	sc := bufio.NewScanner(resp.Body)
+	sc := bufio.NewScanner(r)
 	// Large lines for command output
 	buf := make([]byte, 0, 64*1024)
 	sc.Buffer(buf, 1024*1024)

@@ -2,14 +2,17 @@
 package coordinator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
 )
 
 const maxCoordinatorSubtasks = 8
@@ -168,7 +172,13 @@ func (c *Coordinator) executeWorkers(ctx context.Context, subtasks []Subtask) ([
 				mu.Unlock()
 				return err
 			}
-			result, err := c.runWorker(gctx, st)
+			var result WorkerResult
+			var err error
+			if c.settings.CoordinatorRemote {
+				result, err = c.runWorkerRemote(gctx, st)
+			} else {
+				result, err = c.runWorker(gctx, st)
+			}
 			mu.Lock()
 			results[st.Index] = result
 			mu.Unlock()
@@ -241,6 +251,71 @@ func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, 
 		Index:  st.Index,
 		Task:   st.Description,
 		Output: output.String(),
+	}, nil
+}
+
+func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerResult, error) {
+	mgr, ok, err := ukc.NewManagerFromEnv()
+	if !ok || err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "UKC_TOKEN not set or invalid for remote coordinator"}, fmt.Errorf("remote coordinator needs UKC_TOKEN")
+	}
+
+	name := fmt.Sprintf("drover-worker-%d-%d", st.Index, time.Now().Unix())
+	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Provisioning UKC instance %s...\n", st.Index+1, name)}
+
+	// Create instance
+	token, _ := ukc.RandToken()
+	cfg := mgr.Config()
+	inst, err := ukc.CreateInstance(ctx, cfg, name, cfg.DefaultImage, 512, map[string]string{"AGENT_TOKEN": token})
+	if err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
+	}
+
+	// Always cleanup
+	defer func() {
+		_ = ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
+	}()
+
+	instURL := ukc.InstanceHTTPSURL(inst)
+	if err := ukc.WaitForHealth(ctx, cfg.HTTPClient, instURL, token, cfg.MaxHealthWait); err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "instance health timeout: " + err.Error()}, err
+	}
+
+	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance ready, executing headless task...\n", st.Index+1)}
+
+	safeTask := strings.ReplaceAll(st.Description, "'", "'\\''")
+	command := fmt.Sprintf("drover-code --headless --prompt '%s'", safeTask)
+
+	body, _ := json.Marshal(map[string]string{"command": command})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(instURL, "/")+"/exec", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cfg.HTTPClient.Do(req)
+	if err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "exec POST: " + err.Error()}, err
+	}
+	defer resp.Body.Close()
+	var postResp struct { JobID string `json:"job_id"` }
+	if err := json.NewDecoder(resp.Body).Decode(&postResp); err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "exec POST decode: " + err.Error()}, err
+	}
+
+	streamURL := strings.TrimRight(instURL, "/") + "/exec/" + postResp.JobID + "/stream"
+	outStr, exitCode, err := ukc.ReadExecStream(ctx, cfg.HTTPClient, streamURL, token)
+
+	if err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
+	}
+	if exitCode != 0 {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: outStr}, fmt.Errorf("remote task exited with %d", exitCode)
+	}
+
+	return WorkerResult{
+		Index:  st.Index,
+		Task:   st.Description,
+		Output: outStr,
 	}, nil
 }
 
