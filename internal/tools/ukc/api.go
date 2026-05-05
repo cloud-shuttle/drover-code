@@ -214,7 +214,7 @@ func DeleteInstance(ctx context.Context, cfg Config, uuid string) error {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
-	payload := deleteInstancesBody{{UUID: uuid, Metro: cfg.Metro}}
+	payload := deleteInstancesBody{{UUID: uuid}}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err

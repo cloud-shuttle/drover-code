@@ -14,10 +14,10 @@ Instead of relying on remote Git push workflows or persistent cloud volumes, thi
 
 ### The End-to-End Flow
 
-1. **The Upload (`POST /workspace`)**: The local coordinator archives the local Git repository into a compressed `.tar.gz` payload and securely uploads it to the freshly booted Unikraft instance.
-2. **The Execution (`POST /exec`)**: The `ukc-agent` unzips the payload into an isolated `/workspace` directory, sets it as the working directory, and launches `drover-code --headless`.
+1. **The Upload**: The local coordinator synchronizes the local Git repository to the freshly booted Unikraft instance (e.g., via an initial compressed payload or `rsync`).
+2. **The Execution (`POST /exec`)**: The `ukc-agent` prepares the isolated `/workspace` directory, sets it as the working directory, and launches `drover-code --headless`.
 3. **The SSE Stream (`GET /exec/:id/stream`)**: The coordinator streams real-time logs and AI generation progress back to the local terminal.
-4. **The Download (`GET /workspace`)**: Upon successful exit (Code 0), the coordinator triggers a download of the modified `/workspace` from the instance as a `.tar.gz`.
+4. **The Download**: Upon successful exit (Code 0), the coordinator synchronizes the modified `/workspace` back from the instance, leveraging `rsync` to compute a diff and only pull changed files, greatly reducing network traffic.
 5. **The Merge**: The coordinator safely unpacks the modified files into the local repository.
 6. **The Cleanup**: The Unikraft instance is destroyed.
 
@@ -27,15 +27,17 @@ Instead of relying on remote Git push workflows or persistent cloud volumes, thi
 
 While conceptually simple, network-bound workspace synchronization introduces several critical edge cases that must be mitigated to prevent data loss and ensure a premium developer experience.
 
-### 1. Large Workspace Uploads (Bandwidth & Memory Limits)
+### 1. Large Workspace Uploads & Efficient Syncing
 **The Issue:**
-Modern repositories often exceed several gigabytes due to `node_modules`, `venv`, `.git/objects`, or large build binaries. Attempting to compress and upload a 2GB workspace will consume immense local CPU, saturate outbound bandwidth, and cause the Unikraft instance (which typically has a 512MB memory limit) to instantly panic with an Out-Of-Memory (OOM) error during decompression.
+Modern repositories often exceed several gigabytes due to `node_modules`, `venv`, `.git/objects`, or large build binaries. Attempting to compress and upload a 2GB workspace on every run will consume immense local CPU and saturate outbound bandwidth.
 
 **The Mitigation:**
-The coordinator **must** respect `.gitignore` and `.dockerignore` rules when building the upload archive. 
-- Ignore all build directories (`target/`, `dist/`, `node_modules/`).
-- Send a "shallow" copy of the `.git` directory if git history is required, rather than the entire `objects` database.
-- Enforce a strict max payload size (e.g., 50MB). If the workspace exceeds this, the coordinator halts and prompts the user to add exclusions.
+While Unikraft Cloud instances can comfortably be given gigabytes of memory to handle large operations without OOMing, we still want to minimize network traffic. 
+
+1. **Incremental Syncing (`rsync`)**: For cases requiring multiple syncs between the sandbox and the host, we should use `rsync` over SSH (or equivalent diffing logic). `rsync` computes a diff of the workspace directory and only syncs the changed files, drastically reducing network overhead compared to full `.tar.gz` payloads.
+2. **Exclusion Rules**: The coordinator **must** respect `.gitignore` and `.dockerignore` rules when syncing. 
+    - Ignore all build directories (`target/`, `dist/`, `node_modules/`).
+    - Exclude the heavy `.git/objects` database unless git history is explicitly required.
 
 ### 2. The Concurrency Problem (Parallel Workers Wiping Each Other)
 **The Issue:**

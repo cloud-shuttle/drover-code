@@ -314,8 +314,12 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 
 	// Always cleanup
 	defer func() {
-		_ = ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
-		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
+		err := ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
+		if err != nil {
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to destroy UKC instance %s: %v\n", st.Index+1, name, err)}
+		} else {
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
+		}
 	}()
 
 	if err := ukc.WaitForHealth(ctx, cfg.HTTPClient, instURL, token, cfg.MaxHealthWait); err != nil {
