@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -84,12 +85,16 @@ func WaitForHealth(ctx context.Context, client *http.Client, baseURL, token stri
 	}
 	deadline := time.Now().Add(maxWait)
 	backoff := 200 * time.Millisecond
+	var lastErr string
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for instance health at %s/health", strings.TrimRight(baseURL, "/"))
+			if lastErr == "" {
+				lastErr = "no response"
+			}
+			return fmt.Errorf("timeout waiting for instance health at %s/health (last error: %s)", strings.TrimRight(baseURL, "/"), lastErr)
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/health", nil)
 		if err != nil {
@@ -97,12 +102,16 @@ func WaitForHealth(ctx context.Context, client *http.Client, baseURL, token stri
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		resp, err := client.Do(req)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resp.Body.Close()
-			return nil
-		}
 		if err == nil {
+			if resp.StatusCode == http.StatusOK {
+				resp.Body.Close()
+				return nil
+			}
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			lastErr = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 			resp.Body.Close()
+		} else {
+			lastErr = err.Error()
 		}
 		select {
 		case <-ctx.Done():
