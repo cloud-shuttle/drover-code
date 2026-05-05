@@ -285,6 +285,8 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 		sg, err := ukc.GetServiceGroup(ctx, cfg, inst.ServiceGroup.UUID)
 		if err == nil {
 			inst.ServiceGroup = &sg
+		} else {
+			return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "failed to get service group: " + err.Error()}, err
 		}
 	}
 

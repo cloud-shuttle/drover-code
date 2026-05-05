@@ -197,7 +197,7 @@ func GetServiceGroup(ctx context.Context, cfg Config, uuid string) (ServiceGroup
 	var out struct {
 		Status string `json:"status"`
 		Data   struct {
-			ServiceGroups []ServiceGroup `json:"service_groups"`
+			ServiceGroups []ServiceGroup `json:"services"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &out); err != nil {
