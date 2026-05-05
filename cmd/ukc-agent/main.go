@@ -75,7 +75,8 @@ func main() {
 			http.Error(w, "command required", http.StatusBadRequest)
 			return
 		}
-		id := jobs.start(r.Context(), body.Command)
+		// Run in background context so the job survives the HTTP request
+		id := jobs.start(context.Background(), body.Command)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"job_id": id})
 	})

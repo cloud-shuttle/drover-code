@@ -12,6 +12,7 @@ type cliFlags struct {
 	PromptFile        string
 	ResultJSON        string
 	CoordinatorRemote bool
+	Verbose           bool
 }
 
 // parseCLIFlags extracts known flags from argv. Unknown tokens are ignored so
@@ -21,6 +22,8 @@ func parseCLIFlags(argv []string) (cliFlags, error) {
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
 		switch {
+		case a == "-v" || a == "--verbose":
+			f.Verbose = true
 		case a == "--headless":
 			f.Headless = true
 		case a == "--coordinator-remote":

@@ -343,7 +343,25 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 	}
 
 	streamURL := strings.TrimRight(instURL, "/") + "/exec/" + postResp.JobID + "/stream"
-	outStr, exitCode, err := ukc.ReadExecStream(ctx, cfg.HTTPClient, streamURL, token)
+	var onLine func(string)
+	if c.settings.Verbose {
+		onLine = func(payload string) {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(payload), &m); err != nil {
+				return
+			}
+			typ, _ := m["type"].(string)
+			switch typ {
+			case "tool_start":
+				name, _ := m["name"].(string)
+				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🔨 using tool: %s\n", st.Index+1, name)}
+			case "heartbeat":
+				turn, _ := m["turn"].(float64)
+				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🧠 thinking... (turn %d)\n", st.Index+1, int(turn))}
+			}
+		}
+	}
+	outStr, exitCode, err := ukc.ReadExecStream(ctx, cfg.HTTPClient, streamURL, token, onLine)
 
 	if err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
@@ -389,6 +407,23 @@ func (c *Coordinator) forwardWorkerEvents(workerIdx int, ch <-chan agent.Event) 
 }
 
 func (c *Coordinator) synthesise(ctx context.Context, originalTask string, results []WorkerResult) (string, error) {
+	if c.settings.CoordinatorRemote {
+		var b strings.Builder
+		fmt.Fprintf(&b, "\n## 🤖 Parallel Execution Complete\n\n")
+		for _, r := range results {
+			status := "✅ Completed"
+			if r.IsError {
+				status = "❌ Failed"
+			}
+			fmt.Fprintf(&b, "- **Worker %d** (%s): %s\n", r.Index+1, r.Task, status)
+		}
+		fmt.Fprintf(&b, "\n✨ Parallel tasks complete.\n")
+		
+		// Send it to the terminal exactly like the stream does
+		c.eventCh <- agent.TextDeltaEvent{Text: b.String()}
+		return b.String(), nil
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "Original task: %s\n\nWorker results:\n\n", originalTask)
 	for _, r := range results {

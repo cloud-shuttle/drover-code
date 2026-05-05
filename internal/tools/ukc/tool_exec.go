@@ -106,7 +106,7 @@ func (t *Exec) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 	}
 
 	streamURL := strings.TrimRight(ent.URL, "/") + "/exec/" + post.JobID + "/stream"
-	out, code, err := ReadExecStream(ctx, client, streamURL, ent.Token)
+	out, code, err := ReadExecStream(ctx, client, streamURL, ent.Token, nil)
 	if err != nil {
 		return "", err
 	}

@@ -11,7 +11,7 @@ import (
 )
 
 // ReadExecStream reads SSE events from the agent until done or ctx ends.
-func ReadExecStream(ctx context.Context, client *http.Client, streamURL, token string) (string, int, error) {
+func ReadExecStream(ctx context.Context, client *http.Client, streamURL, token string, onLine func(string)) (string, int, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -32,11 +32,11 @@ func ReadExecStream(ctx context.Context, client *http.Client, streamURL, token s
 		return "", 0, fmt.Errorf("stream: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
-	return ParseExecStream(resp.Body)
+	return ParseExecStream(resp.Body, onLine)
 }
 
 // ParseExecStream parses SSE events from an io.Reader.
-func ParseExecStream(r io.Reader) (string, int, error) {
+func ParseExecStream(r io.Reader, onLine func(string)) (string, int, error) {
 	var out strings.Builder
 	code := 0
 	sc := bufio.NewScanner(r)
@@ -52,6 +52,9 @@ func ParseExecStream(r io.Reader) (string, int, error) {
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if payload == "" {
 			continue
+		}
+		if onLine != nil {
+			onLine(payload)
 		}
 		var m map[string]any
 		if err := json.Unmarshal([]byte(payload), &m); err != nil {

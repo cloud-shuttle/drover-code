@@ -58,6 +58,9 @@ func main() {
 	if startupFlags.CoordinatorRemote {
 		settings.CoordinatorRemote = true
 	}
+	if startupFlags.Verbose {
+		settings.Verbose = true
+	}
 
 	modelStr := coalesce(os.Getenv("ANTHROPIC_MODEL"), settings.Model, defaultModel)
 
