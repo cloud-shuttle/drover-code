@@ -28,6 +28,14 @@ func apiBaseForMetro(metro string) string {
 	if metro == "" {
 		metro = "fra"
 	}
+	if strings.HasPrefix(metro, "http://") || strings.HasPrefix(metro, "https://") {
+		return strings.TrimRight(metro, "/")
+	}
+	// Also catch cases where they might have accidentally forgotten the colon
+	if strings.HasPrefix(metro, "http//") || strings.HasPrefix(metro, "https//") {
+		metro = strings.Replace(metro, "//", "://", 1)
+		return strings.TrimRight(metro, "/")
+	}
 	return "https://api." + metro + ".unikraft.cloud"
 }
 
