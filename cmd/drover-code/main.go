@@ -90,7 +90,7 @@ func main() {
 	case envTruthy("DROVER_CODE_IDE_BRIDGE"):
 		runBridgeMode(ctx, client, mgr, registry, settings, workDir, dreamWorker)
 
-	case envTruthy("DROVER_CODE_COORDINATOR_MODE") || settings.CoordinatorMode:
+	case envTruthy("DROVER_CODE_COORDINATOR_MODE") || settings.CoordinatorMode || settings.CoordinatorRemote:
 		runCoordinatorMode(ctx, client, registry, modelStr, workDir, settings, dreamWorker)
 
 	default:
