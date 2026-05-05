@@ -280,6 +280,14 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
 	}
 
+	// Fetch the complete Service Group object to get the Domains if they aren't included inline
+	if inst.ServiceGroup != nil && inst.ServiceGroup.UUID != "" && len(inst.ServiceGroup.Domains) == 0 {
+		sg, err := ukc.GetServiceGroup(ctx, cfg, inst.ServiceGroup.UUID)
+		if err == nil {
+			inst.ServiceGroup = &sg
+		}
+	}
+
 	instURL := ukc.InstanceHTTPSURL(inst)
 	if instURL == "" {
 		// Cleanup the instance if we couldn't get a URL

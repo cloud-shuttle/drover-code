@@ -53,7 +53,6 @@ type createInstanceBody struct {
 }
 
 type createInstanceServiceGroup struct {
-	Name     string       `json:"name,omitempty"`
 	Services []apiService `json:"services"`
 }
 
@@ -67,21 +66,22 @@ type createInstanceResponse struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 	Data    *struct {
-		Instances []apiInstance `json:"instances"`
+		Instances []Instance `json:"instances"`
 	} `json:"data"`
 }
 
-type apiInstance struct {
-	UUID         string           `json:"uuid"`
-	Name         string           `json:"name"`
-	State        string           `json:"state"`
-	Metro        string           `json:"metro"`
-	ServiceGroup *apiServiceGroup `json:"service_group"`
-	PrivateFQDN  string           `json:"private_fqdn"`
-	FQDN         string           `json:"fqdn"`
+type Instance struct {
+	UUID         string        `json:"uuid"`
+	Name         string        `json:"name"`
+	State        string        `json:"state"`
+	Metro        string        `json:"metro"`
+	ServiceGroup *ServiceGroup `json:"service_group"`
+	PrivateFQDN  string        `json:"private_fqdn"`
+	FQDN         string        `json:"fqdn"`
 }
 
-type apiServiceGroup struct {
+type ServiceGroup struct {
+	UUID    string `json:"uuid"`
 	Domains []struct {
 		FQDN string `json:"fqdn"`
 	} `json:"domains"`
@@ -100,7 +100,7 @@ type deleteInstancesResponse struct {
 }
 
 // CreateInstance calls POST /v1/instances and returns the first created instance record.
-func CreateInstance(ctx context.Context, cfg Config, name, image string, memoryMB int, env map[string]string) (apiInstance, error) {
+func CreateInstance(ctx context.Context, cfg Config, name, image string, memoryMB int, env map[string]string) (Instance, error) {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
@@ -118,7 +118,6 @@ func CreateInstance(ctx context.Context, cfg Config, name, image string, memoryM
 		Metro:     metro,
 		Autostart: true,
 		ServiceGroup: &createInstanceServiceGroup{
-			Name: name + "-sg",
 			Services: []apiService{{
 				Port:            443,
 				DestinationPort: agentListenPort,
@@ -135,40 +134,79 @@ func CreateInstance(ctx context.Context, cfg Config, name, image string, memoryM
 
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return apiInstance{}, err
+		return Instance{}, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.APIBaseURL, "/")+"/v1/instances", bytes.NewReader(raw))
 	if err != nil {
-		return apiInstance{}, err
+		return Instance{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-		return apiInstance{}, err
+		return Instance{}, err
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return apiInstance{}, err
+		return Instance{}, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return apiInstance{}, fmt.Errorf("ukc create instance: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return Instance{}, fmt.Errorf("ukc create instance: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
 	var out createInstanceResponse
 	if err := json.Unmarshal(respBody, &out); err != nil {
-		return apiInstance{}, fmt.Errorf("ukc create instance: decode: %w", err)
+		return Instance{}, fmt.Errorf("ukc create instance: decode: %w", err)
 	}
 	if out.Status != "" && out.Status != "success" {
-		return apiInstance{}, fmt.Errorf("ukc create instance: status %q: %s", out.Status, out.Message)
+		return Instance{}, fmt.Errorf("ukc create instance: status %q: %s", out.Status, out.Message)
 	}
 	if out.Data == nil || len(out.Data.Instances) == 0 {
-		return apiInstance{}, fmt.Errorf("ukc create instance: empty instances in response")
+		return Instance{}, fmt.Errorf("ukc create instance: empty instances in response")
 	}
 	return out.Data.Instances[0], nil
+}
+
+// GetServiceGroup fetches a service group by UUID to retrieve its domains.
+func GetServiceGroup(ctx context.Context, cfg Config, uuid string) (ServiceGroup, error) {
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = http.DefaultClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.APIBaseURL, "/")+"/v1/services/"+uuid, nil)
+	if err != nil {
+		return ServiceGroup{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.Token)
+
+	resp, err := cfg.HTTPClient.Do(req)
+	if err != nil {
+		return ServiceGroup{}, err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return ServiceGroup{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ServiceGroup{}, fmt.Errorf("ukc get service group: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var out struct {
+		Status string `json:"status"`
+		Data   struct {
+			ServiceGroups []ServiceGroup `json:"service_groups"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return ServiceGroup{}, err
+	}
+	if len(out.Data.ServiceGroups) == 0 {
+		return ServiceGroup{}, fmt.Errorf("service group not found")
+	}
+	return out.Data.ServiceGroups[0], nil
 }
 
 // DeleteInstance removes an instance by UUID.
@@ -209,24 +247,13 @@ func DeleteInstance(ctx context.Context, cfg Config, uuid string) error {
 }
 
 // InstanceHTTPSURL returns a public HTTPS base URL for health and agent calls.
-func InstanceHTTPSURL(inst apiInstance) string {
+func InstanceHTTPSURL(inst Instance) string {
 	// If the API returns the Service Group domain directly, use it!
 	if inst.ServiceGroup != nil && len(inst.ServiceGroup.Domains) > 0 {
 		host := strings.TrimSpace(inst.ServiceGroup.Domains[0].FQDN)
 		host = strings.TrimSuffix(host, ".")
 		if host != "" {
 			return "https://" + host
-		}
-	}
-	
-	// If it doesn't return the Service Group domain, we can compute it!
-	// We named the Service Group: inst.Name + "-sg"
-	// We can get the base domain from inst.FQDN (e.g. wispy-violet.syd0-plausible-gnu.unikraft.app -> .syd0-plausible-gnu.unikraft.app)
-	if inst.FQDN != "" && inst.Name != "" {
-		idx := strings.Index(inst.FQDN, ".")
-		if idx != -1 {
-			baseDomain := inst.FQDN[idx:] // e.g. ".syd0-plausible-gnu.unikraft.app"
-			return fmt.Sprintf("https://%s-sg%s", inst.Name, baseDomain)
 		}
 	}
 	

@@ -6,17 +6,17 @@ import (
 )
 
 func TestInstanceHTTPSURL_fallbackMetro(t *testing.T) {
-	u := InstanceHTTPSURL(apiInstance{Name: "my-worker", Metro: "fra"})
+	u := InstanceHTTPSURL(Instance{Name: "my-worker", Metro: "fra"})
 	if !strings.HasPrefix(u, "https://") || !strings.Contains(u, ".fra0.unikraft.app") {
 		t.Fatalf("got %q", u)
 	}
 }
 
 func TestInstanceHTTPSURL_prefersDomain(t *testing.T) {
-	u := InstanceHTTPSURL(apiInstance{
+	u := InstanceHTTPSURL(Instance{
 		Name:  "x",
 		Metro: "fra",
-		ServiceGroup: &apiServiceGroup{
+		ServiceGroup: &ServiceGroup{
 			Domains: []struct {
 				FQDN string `json:"fqdn"`
 			}{{FQDN: "custom.example.com."}},
