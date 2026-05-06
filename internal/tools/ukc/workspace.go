@@ -12,8 +12,17 @@ import (
 	"strings"
 )
 
-// Default exclusions for uploading workspaces
-var defaultExcludes = []string{
+var rootExcludes = []string{
+	"drover-local",
+	"drover-code",
+	"claude-go",
+	"ukc-agent",
+	"cmd/ukc-agent/ukc-agent",
+	"bin",
+	"unikraft",
+}
+
+var anywhereExcludes = []string{
 	".git",
 	"node_modules",
 	"dist",
@@ -22,19 +31,19 @@ var defaultExcludes = []string{
 	".venv",
 	"venv",
 	".unikraft",
-	"unikraft",
-	"bin",
-	"drover-local",
-	"drover-code",
-	"claude-go",
-	"ukc-agent",
-	"cmd/ukc-agent/ukc-agent",
 }
 
 func shouldExclude(relPath string) bool {
 	// Normalize path for matching
 	relPath = filepath.ToSlash(relPath)
-	for _, ex := range defaultExcludes {
+	
+	for _, ex := range rootExcludes {
+		if relPath == ex || strings.HasPrefix(relPath, ex+"/") {
+			return true
+		}
+	}
+	
+	for _, ex := range anywhereExcludes {
 		if relPath == ex || strings.HasPrefix(relPath, ex+"/") || strings.Contains(relPath, "/"+ex+"/") || strings.HasSuffix(relPath, "/"+ex) {
 			return true
 		}
