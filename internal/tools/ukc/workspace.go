@@ -31,6 +31,7 @@ var anywhereExcludes = []string{
 	".venv",
 	"venv",
 	".unikraft",
+	".drover-code-workers",
 }
 
 func shouldExclude(relPath string) bool {
