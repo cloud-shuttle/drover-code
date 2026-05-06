@@ -391,6 +391,7 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 
 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Task complete. Downloading modified workspace...\n", st.Index+1)}
 	downloadDir := filepath.Join(st.IsolatedDir, "workspace_downloaded")
+	_ = os.RemoveAll(downloadDir)
 	if err := ukc.DownloadWorkspace(ctx, cfg, inst, downloadDir, token); err != nil {
 		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to download workspace: %v\n", st.Index+1, err)}
 	} else {
