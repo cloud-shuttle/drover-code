@@ -518,8 +518,9 @@ func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, d
 	}
 
 	// Copy files (using rsync to handle deletes, but fallback to cp if needed)
-	rsyncCmd := exec.CommandContext(ctx, "rsync", "-a", "--delete", "--exclude=.git", downloadedDir+"/", c.workDir+"/")
+	rsyncCmd := exec.CommandContext(ctx, "rsync", "-a", "--delete", "--exclude=.git", "--exclude=.drover-code-workers", "--exclude=.unikraft", downloadedDir+"/", c.workDir+"/")
 	if err := rsyncCmd.Run(); err != nil {
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Rsync failed, falling back to cp: %v\n", st.Index+1, err)}
 		// fallback to cp if rsync is not available
 		cpCmd := exec.CommandContext(ctx, "cp", "-R", downloadedDir+"/", c.workDir+"/")
 		if err := cpCmd.Run(); err != nil {
@@ -528,13 +529,27 @@ func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, d
 	}
 
 	// Commit changes
-	_ = exec.CommandContext(ctx, "git", "-C", c.workDir, "add", ".").Run()
-	_ = exec.CommandContext(ctx, "git", "-C", c.workDir, "commit", "-m", fmt.Sprintf("AI Gen: %s", st.Description)).Run()
+	if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "add", ".").Run(); err != nil {
+		return fmt.Errorf("git add: %v", err)
+	}
+	
+	// We check if there's anything to commit first
+	statusCmd := exec.CommandContext(ctx, "git", "-C", c.workDir, "status", "--porcelain")
+	outBytes, _ := statusCmd.Output()
+	if len(bytes.TrimSpace(outBytes)) == 0 {
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ No changes produced by worker to commit.\n", st.Index+1)}
+	} else {
+		if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "commit", "-m", fmt.Sprintf("AI Gen: %s", st.Description)).Run(); err != nil {
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to commit changes: %v\n", st.Index+1, err)}
+		} else {
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ✅ Workspace merged into branch `%s`\n", st.Index+1, branchName)}
+		}
+	}
 
 	// Return to previous branch
-	_ = exec.CommandContext(ctx, "git", "-C", c.workDir, "checkout", "-").Run()
-
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ✅ Workspace merged into branch `%s`\n", st.Index+1, branchName)}
+	if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "checkout", "-").Run(); err != nil {
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to restore original branch: %v\n", st.Index+1, err)}
+	}
 	return nil
 }
 
