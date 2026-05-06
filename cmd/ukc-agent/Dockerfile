@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /ukc-agent ./cmd/ukc-agent
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /drover-code ./cmd/drover-code
 
 FROM --platform=linux/amd64 alpine:3.18
-RUN apk add --no-cache ca-certificates git openssh tzdata bash
+RUN apk add --no-cache ca-certificates git openssh tzdata bash curl
 COPY --from=builder /ukc-agent /usr/local/bin/ukc-agent
 COPY --from=builder /drover-code /usr/local/bin/drover-code
 EXPOSE 8080

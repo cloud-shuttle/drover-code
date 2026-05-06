@@ -56,6 +56,7 @@ func (jr *jobRunner) runCommand(parent context.Context, j *job, command string) 
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd.Dir = "/workspace"
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		j.emitThenClose(err.Error(), 1)

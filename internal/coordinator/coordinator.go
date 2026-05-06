@@ -445,6 +445,9 @@ func (c *Coordinator) synthesise(ctx context.Context, originalTask string, resul
 			if r.IsError {
 				status = "❌ Failed"
 			}
+			if r.Output != "" {
+				status += "\n  " + strings.TrimSpace(r.Output)
+			}
 			fmt.Fprintf(&b, "- **Worker %d** (%s): %s\n", r.Index+1, r.Task, status)
 		}
 		fmt.Fprintf(&b, "\n✨ Parallel tasks complete.\n")
