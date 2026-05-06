@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -54,6 +55,7 @@ type Coordinator struct {
 	eventCh    chan<- agent.Event
 	settings   config.Settings
 	MaxWorkers int
+	gitMu      sync.Mutex
 }
 
 func New(client *api.Client, registry *tools.Registry, workDir string, eventCh chan<- agent.Event, settings config.Settings) *Coordinator {
@@ -314,16 +316,21 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 
 	// Always cleanup
 	defer func() {
-		err := ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
-		if err != nil {
-			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to destroy UKC instance %s: %v\n", st.Index+1, name, err)}
-		} else {
-			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
-		}
+		// err := ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
+		// if err != nil {
+		// 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to destroy UKC instance %s: %v\n", st.Index+1, name, err)}
+		// } else {
+		// 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
+		// }
 	}()
 
 	if err := ukc.WaitForHealth(ctx, cfg.HTTPClient, instURL, token, cfg.MaxHealthWait); err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "instance health timeout: " + err.Error()}, err
+	}
+
+	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Uploading local workspace to cloud instance...\n", st.Index+1)}
+	if err := ukc.UploadWorkspace(ctx, cfg, inst, c.workDir, token); err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "upload workspace failed: " + err.Error()}, err
 	}
 
 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance ready, executing headless task...\n", st.Index+1)}
@@ -380,6 +387,16 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 	}
 	if exitCode != 0 {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: outStr}, fmt.Errorf("remote task exited with %d", exitCode)
+	}
+
+	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Task complete. Downloading modified workspace...\n", st.Index+1)}
+	downloadDir := filepath.Join(st.IsolatedDir, "workspace_downloaded")
+	if err := ukc.DownloadWorkspace(ctx, cfg, inst, downloadDir, token); err != nil {
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to download workspace: %v\n", st.Index+1, err)}
+	} else {
+		if err := c.syncDownloadedWorkspace(ctx, st, downloadDir); err != nil {
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to merge workspace: %v\n", st.Index+1, err)}
+		}
 	}
 
 	return WorkerResult{
@@ -476,6 +493,45 @@ func (c *Coordinator) synthesise(ctx context.Context, originalTask string, resul
 		return "", stream.Err()
 	}
 	return summary.String(), nil
+}
+
+func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, downloadedDir string) error {
+	c.gitMu.Lock()
+	defer c.gitMu.Unlock()
+
+	// Check if working tree is dirty
+	cmd := exec.CommandContext(ctx, "git", "-C", c.workDir, "status", "--porcelain")
+	out, err := cmd.Output()
+	if err == nil && len(bytes.TrimSpace(out)) > 0 {
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Working tree is dirty! Skipping auto-merge. Downloaded files are saved in %s\n", st.Index+1, downloadedDir)}
+		return nil
+	}
+
+	// Create new branch
+	branchName := fmt.Sprintf("drover/task-%d-%d", st.Index+1, time.Now().Unix())
+	if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "checkout", "-b", branchName).Run(); err != nil {
+		return fmt.Errorf("git checkout -b: %v", err)
+	}
+
+	// Copy files (using rsync to handle deletes, but fallback to cp if needed)
+	rsyncCmd := exec.CommandContext(ctx, "rsync", "-a", "--delete", "--exclude=.git", downloadedDir+"/", c.workDir+"/")
+	if err := rsyncCmd.Run(); err != nil {
+		// fallback to cp if rsync is not available
+		cpCmd := exec.CommandContext(ctx, "cp", "-R", downloadedDir+"/", c.workDir+"/")
+		if err := cpCmd.Run(); err != nil {
+			return fmt.Errorf("failed to copy files: %v", err)
+		}
+	}
+
+	// Commit changes
+	_ = exec.CommandContext(ctx, "git", "-C", c.workDir, "add", ".").Run()
+	_ = exec.CommandContext(ctx, "git", "-C", c.workDir, "commit", "-m", fmt.Sprintf("AI Gen: %s", st.Description)).Run()
+
+	// Return to previous branch
+	_ = exec.CommandContext(ctx, "git", "-C", c.workDir, "checkout", "-").Run()
+
+	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ✅ Workspace merged into branch `%s`\n", st.Index+1, branchName)}
+	return nil
 }
 
 func workerSystemPrompt(task string) string {

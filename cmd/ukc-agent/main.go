@@ -17,6 +17,7 @@ import (
 const (
 	defaultListen    = ":8080"
 	healthPath       = "/health"
+	workspacePath    = "/workspace"
 	execPath         = "/exec"
 	execStreamPath   = "/exec/" // + jobID + "/stream"
 	headerAuth       = "Authorization"
@@ -53,6 +54,20 @@ func main() {
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
+	})
+	mux.HandleFunc(workspacePath, func(w http.ResponseWriter, r *http.Request) {
+		if !checkBearer(r, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.Method == http.MethodPost {
+			handleUploadWorkspace(w, r)
+			return
+		} else if r.Method == http.MethodGet {
+			handleDownloadWorkspace(w, r)
+			return
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
 	mux.HandleFunc(execPath, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

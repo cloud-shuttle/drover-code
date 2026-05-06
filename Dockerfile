@@ -6,8 +6,9 @@
 FROM --platform=linux/amd64 golang:1.22-alpine AS builder
 WORKDIR /app
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /ukc-agent ./cmd/ukc-agent
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /drover-code ./cmd/drover-code
+RUN apk add --no-cache gcc musl-dev
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o /ukc-agent ./cmd/ukc-agent
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o /drover-code ./cmd/drover-code
 
 FROM --platform=linux/amd64 alpine:3.18
 RUN apk add --no-cache ca-certificates git openssh tzdata bash

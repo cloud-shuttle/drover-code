@@ -11,3 +11,17 @@
 
 # macOS
 .DS_Store
+
+# UKC Agent artifacts
+.unikraft
+.drover-code-workers
+/drover-local
+/ukc-agent
+/unikraft
+cmd/ukc-agent/.unikraft
+cmd/ukc-agent/ukc-agent
+cmd/ukc-agent/drover-code
+TEST.txt
+patch.go
+scratch_cleanup.go
+Write a python script to calculate the fibonacci sequence
