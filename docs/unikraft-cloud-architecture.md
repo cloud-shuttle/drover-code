@@ -60,3 +60,16 @@ The architecture workflow becomes seamless:
 5. The diff is reliably merged back to the local repository, and the worker instantly dies.
 
 Ultimately, Unikraft Cloud allows `drover-code` to break free of local hardware constraints, delivering a secure, parallelized, and instantly scalable execution environment that feels as fast as running it locally.
+
+## 6. Advanced Orchestration Features
+
+To support production-grade workflows, the `drover-code` and Unikraft Cloud integration has been hardened with advanced orchestration capabilities:
+
+### Dynamic Custom Toolchains (`drover-worker.Dockerfile`)
+Not all AI tasks run on the same stack. The orchestrator automatically detects if a workspace requires specialized dependencies (like Python libraries, Rust compilers, or C-bindings) via a `drover-worker.Dockerfile`. It seamlessly compiles a custom OCI image using the base Unikraft Agent and provisions the cloud instance with this tailored environment, combining infinite flexibility with Kraftcloud's millisecond boot times.
+
+### Resilient SSE Streaming
+Running complex AI execution graphs remotely can take minutes. If the connection drops due to load balancers or network flakes, the execution shouldn't be lost. The Unikraft Agent maintains a stateful, in-memory event history buffer. Using `Last-Event-ID` mechanisms, the local orchestrator can transparently reconnect and replay any missed events, ensuring a flawless streaming transcript without dropping the MicroVM.
+
+### Automated Acceptance & Auto-Merge
+Delegating code generation to the cloud is only useful if it safely integrates back into your local workflow. With the `--accept-cmd` functionality, the orchestrator commits the cloud worker's diff to an isolated Git branch and triggers a local acceptance test (like `cargo test` or `npm run build`). If the tests pass, the remote agent's work is automatically merged into the developer's working branch, creating a completely hands-free, safe CI/CD loop for AI-generated code.
