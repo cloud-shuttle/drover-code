@@ -34,22 +34,33 @@ echo "Summarise the README" | ANTHROPIC_API_KEY=sk-ant-... ./drover-code
 
 Headless mode is designed to run as a **non-interactive batch worker** (no TTY, no permission prompts), e.g. one job per **Unikraft unikernel** instance.
 
+> **Read more:** [Scaling Agentic Coding: Drover-Code and Unikraft Cloud](docs/unikraft-cloud-architecture.md)
+
 - **Activation**: set `DROVER_CODE_HEADLESS=1` (recommended) or rely on non-TTY stdin.
 - **Permissions preset**: set `DROVER_CODE_PERMISSION_PRESET=unikernel` to run with an allowlist-oriented policy intended for isolated workers.
 - **Machine output**: pipe/redirect stdout (non-TTY) or set `DROVER_CODE_JSONL=1` to force JSON Lines events. Set `DROVER_CODE_HEADLESS_PLAIN=1` to force plain text instead.
 - **Completion artifact**: set `DROVER_CODE_RESULT_PATH=/path/to/result.json` (or pass `--result-json /path/to/result.json`) to write a final structured result on exit.
 
-Example (one-shot prompt via stdin, JSONL output + result file):
+#### Unikraft Cloud Orchestration
+
+When operating as a remote agent on Unikraft Cloud, the worker instance runs a dedicated HTTP wrapper called `ukc-agent` (found in `cmd/ukc-agent`). This agent exposes secure endpoints for the local coordinator:
+
+1. **Workspace Sync** (`/workspace`): Handles uploading the local repository to the worker and securely downloading artifacts/diffs back upon completion.
+2. **Execution Streams** (`/exec`): Allows real-time streaming of tool execution logs back to the coordinator.
+
+To secure this communication, the Unikraft worker must be booted with an `AGENT_TOKEN` environment variable.
+
+**Coordinator Execution Example:**
+When running a task across remote workers, you can enable the `--verbose` flag on the coordinator to stream the remote `ukc-agent` logs directly to your local terminal:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-export DROVER_CODE_HEADLESS=1
-export DROVER_CODE_PERMISSION_PRESET=unikernel
-export DROVER_CODE_JSONL=1
-export DROVER_CODE_RESULT_PATH=/tmp/drover-code-result.json
+export CLAUDE_CODE_COORDINATOR_MODE=1
 
-echo "Run unit tests and summarise failures." | ./drover-code
+# Dispatch and stream remote execution logs
+./drover-code --verbose
 ```
+
 
 **Model** — default is baked into the binary; override with:
 

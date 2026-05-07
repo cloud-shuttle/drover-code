@@ -9,6 +9,7 @@ Single static Go binary: Anthropic Messages API client with streaming, tools, Bu
 | Path | Role |
 |------|------|
 | `cmd/drover-code` | CLI entry: TUI, headless, `webhook`, flags |
+| `cmd/ukc-agent` | HTTP agent for Unikraft Cloud instances (workspace sync & exec) |
 | `internal/agent` | Agent loop, events |
 | `internal/api` | HTTP client, SSE stream |
 | `internal/bridge` | IDE bridge (JSON-RPC framing over stdio) |
@@ -26,6 +27,7 @@ Single static Go binary: Anthropic Messages API client with streaming, tools, Bu
 
 ```bash
 CGO_ENABLED=0 go build -o drover-code ./cmd/drover-code
+CGO_ENABLED=0 go build -o ukc-agent ./cmd/ukc-agent
 CGO_ENABLED=0 go test ./...
 ```
 
