@@ -287,13 +287,20 @@ func (c *Coordinator) buildCustomToolchain(ctx context.Context) (string, error) 
 
 	defaultImage := mgr.Config().DefaultImage
 	parts := strings.Split(defaultImage, "/")
-	if len(parts) < 2 {
+	
+	var registry, namespace string
+	if len(parts) >= 3 {
+		registry = parts[0]
+		namespace = parts[1]
+	} else if len(parts) == 2 {
+		registry = "docker.io"
+		namespace = parts[0]
+	} else {
 		return "", fmt.Errorf("invalid default image format for parsing namespace: %s", defaultImage)
 	}
-	namespace := parts[len(parts)-2]
 
 	projectName := filepath.Base(c.workDir)
-	customImage := fmt.Sprintf("index.unikraft.io/%s/drover-worker-%s:latest", namespace, projectName)
+	customImage := fmt.Sprintf("%s/%s/drover-worker-%s:latest", registry, namespace, projectName)
 
 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n🔨 Found drover-worker.Dockerfile! Building custom toolchain image: %s\n", customImage)}
 
