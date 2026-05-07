@@ -12,6 +12,7 @@ type cliFlags struct {
 	PromptFile        string
 	ResultJSON        string
 	CoordinatorRemote bool
+	CloudMode         bool
 	AcceptCmd         string
 	Verbose           bool
 }
@@ -29,6 +30,8 @@ func parseCLIFlags(argv []string) (cliFlags, error) {
 			f.Headless = true
 		case a == "--coordinator-remote":
 			f.CoordinatorRemote = true
+		case a == "--cloud":
+			f.CloudMode = true
 		case a == "-p" || a == "--prompt":
 			if i+1 >= len(argv) {
 				return f, fmt.Errorf("%s: value required", a)
