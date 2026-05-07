@@ -26,6 +26,7 @@ type Settings struct {
 	MaxTokens                  int               `json:"maxTokens,omitempty"`
 	CoordinatorMode            bool              `json:"coordinatorMode,omitempty"`
 	CoordinatorRemote          bool              `json:"coordinatorRemote,omitempty"`
+	AcceptCmd                  string            `json:"acceptCmd,omitempty"`
 	Verbose                    bool              `json:"verbose,omitempty"`
 	DreamEnabled               bool              `json:"dreamEnabled,omitempty"`
 	UndercoverMode             *bool             `json:"undercoverMode,omitempty"`
@@ -276,6 +277,9 @@ func mergeInto(dst *Settings, src Settings) {
 	}
 	if src.CoordinatorRemote {
 		dst.CoordinatorRemote = true
+	}
+	if src.AcceptCmd != "" {
+		dst.AcceptCmd = src.AcceptCmd
 	}
 	if src.Verbose {
 		dst.Verbose = true

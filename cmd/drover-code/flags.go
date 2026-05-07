@@ -12,6 +12,7 @@ type cliFlags struct {
 	PromptFile        string
 	ResultJSON        string
 	CoordinatorRemote bool
+	AcceptCmd         string
 	Verbose           bool
 }
 
@@ -54,6 +55,14 @@ func parseCLIFlags(argv []string) (cliFlags, error) {
 			f.ResultJSON = argv[i]
 		case strings.HasPrefix(a, "--result-json="):
 			f.ResultJSON = strings.TrimPrefix(a, "--result-json=")
+		case a == "--accept-cmd":
+			if i+1 >= len(argv) {
+				return f, fmt.Errorf("%s: command required", a)
+			}
+			i++
+			f.AcceptCmd = argv[i]
+		case strings.HasPrefix(a, "--accept-cmd="):
+			f.AcceptCmd = strings.TrimPrefix(a, "--accept-cmd=")
 		default:
 			// ignore unknown
 		}

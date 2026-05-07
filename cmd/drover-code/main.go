@@ -58,6 +58,9 @@ func main() {
 	if startupFlags.CoordinatorRemote {
 		settings.CoordinatorRemote = true
 	}
+	if startupFlags.AcceptCmd != "" {
+		settings.AcceptCmd = startupFlags.AcceptCmd
+	}
 	if startupFlags.Verbose {
 		settings.Verbose = true
 	}

@@ -15,8 +15,11 @@ import (
 )
 
 type job struct {
-	id     string
-	events chan map[string]any
+	id        string
+	mu        sync.Mutex
+	history   []map[string]any
+	done      bool
+	listeners []chan struct{}
 }
 
 type jobRunner struct {
@@ -31,8 +34,9 @@ func newJobRunner(_ string) *jobRunner {
 func (jr *jobRunner) start(parent context.Context, command string) string {
 	id := randomID()
 	j := &job{
-		id:     id,
-		events: make(chan map[string]any, 128),
+		id:        id,
+		history:   make([]map[string]any, 0),
+		listeners: make([]chan struct{}, 0),
 	}
 	jr.mu.Lock()
 	jr.jobs[id] = j
@@ -105,13 +109,39 @@ func (j *job) emitThenClose(errMsg string, code int) {
 
 func (j *job) emitFinal(code int) {
 	j.trySend(map[string]any{"done": true, "exit_code": code})
-	close(j.events)
 }
 
 func (j *job) trySend(m map[string]any) {
-	select {
-	case j.events <- m:
-	default:
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.history = append(j.history, m)
+	if done, _ := m["done"].(bool); done {
+		j.done = true
+	}
+	for _, ch := range j.listeners {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (j *job) subscribe() chan struct{} {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	ch := make(chan struct{}, 1)
+	j.listeners = append(j.listeners, ch)
+	return ch
+}
+
+func (j *job) unsubscribe(ch chan struct{}) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for i, c := range j.listeners {
+		if c == ch {
+			j.listeners = append(j.listeners[:i], j.listeners[i+1:]...)
+			break
+		}
 	}
 }
 
@@ -139,7 +169,6 @@ func (jr *jobRunner) streamSSE(w http.ResponseWriter, r *http.Request, jobID str
 		http.Error(w, "unknown job_id", http.StatusNotFound)
 		return fmt.Errorf("unknown job")
 	}
-	defer jr.remove(jobID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -150,22 +179,54 @@ func (jr *jobRunner) streamSSE(w http.ResponseWriter, r *http.Request, jobID str
 		return fmt.Errorf("no flush")
 	}
 
+	startIndex := 0
+	lastIDStr := r.Header.Get("Last-Event-ID")
+	if lastIDStr != "" {
+		fmt.Sscanf(lastIDStr, "%d", &startIndex)
+		startIndex++
+	}
+
+	ch := j.subscribe()
+	defer j.unsubscribe(ch)
+
 	ctx := r.Context()
-	for ev := range j.events {
-		if err := ctx.Err(); err != nil {
-			return err
+	for {
+		j.mu.Lock()
+		avail := len(j.history)
+		j.mu.Unlock()
+
+		for startIndex < avail {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			j.mu.Lock()
+			ev := j.history[startIndex]
+			j.mu.Unlock()
+
+			line, err := json.Marshal(ev)
+			if err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "id: %d\n", startIndex); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+				return err
+			}
+			fl.Flush()
+
+			if done, _ := ev["done"].(bool); done {
+				return nil
+			}
+			startIndex++
 		}
-		line, err := json.Marshal(ev)
-		if err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
-			return err
-		}
-		fl.Flush()
-		if done, _ := ev["done"].(bool); done {
-			return nil
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ch:
+			// more events available
 		}
 	}
-	return nil
 }

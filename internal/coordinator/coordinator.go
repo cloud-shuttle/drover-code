@@ -164,6 +164,15 @@ func (c *Coordinator) executeWorkers(ctx context.Context, subtasks []Subtask) ([
 
 	results := make([]WorkerResult, len(subtasks))
 
+	var customImage string
+	if c.settings.CoordinatorRemote {
+		var err error
+		customImage, err = c.buildCustomToolchain(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("custom toolchain: %w", err)
+		}
+	}
+
 	sem := make(chan struct{}, c.MaxWorkers)
 	g, gctx := errgroup.WithContext(ctx)
 	var mu sync.Mutex
@@ -186,7 +195,7 @@ func (c *Coordinator) executeWorkers(ctx context.Context, subtasks []Subtask) ([
 			var result WorkerResult
 			var err error
 			if c.settings.CoordinatorRemote {
-				result, err = c.runWorkerRemote(gctx, st)
+				result, err = c.runWorkerRemote(gctx, st, customImage)
 			} else {
 				result, err = c.runWorker(gctx, st)
 			}
@@ -265,7 +274,52 @@ func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, 
 	}, nil
 }
 
-func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerResult, error) {
+func (c *Coordinator) buildCustomToolchain(ctx context.Context) (string, error) {
+	dockerfilePath := filepath.Join(c.workDir, "drover-worker.Dockerfile")
+	if _, err := os.Stat(dockerfilePath); os.IsNotExist(err) {
+		return "", nil // No custom toolchain
+	}
+
+	mgr, ok, err := ukc.NewManagerFromEnv()
+	if !ok || err != nil {
+		return "", fmt.Errorf("could not load ukc config to determine namespace: %v", err)
+	}
+
+	defaultImage := mgr.Config().DefaultImage
+	parts := strings.Split(defaultImage, "/")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("invalid default image format for parsing namespace: %s", defaultImage)
+	}
+	namespace := parts[len(parts)-2]
+
+	projectName := filepath.Base(c.workDir)
+	customImage := fmt.Sprintf("index.unikraft.io/%s/drover-worker-%s:latest", namespace, projectName)
+
+	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n🔨 Found drover-worker.Dockerfile! Building custom toolchain image: %s\n", customImage)}
+
+	// Build
+	buildCmd := exec.CommandContext(ctx, "docker", "build", "--platform", "linux/amd64", "-t", customImage, "-f", dockerfilePath, c.workDir)
+	// Optionally capture output or redirect to coordinator's stdout
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return "", fmt.Errorf("docker build failed: %v", err)
+	}
+
+	// Push
+	c.eventCh <- agent.TextDeltaEvent{Text: "☁️ Pushing custom image to Kraftcloud registry...\n"}
+	pushCmd := exec.CommandContext(ctx, "docker", "push", customImage)
+	pushCmd.Stdout = os.Stdout
+	pushCmd.Stderr = os.Stderr
+	if err := pushCmd.Run(); err != nil {
+		return "", fmt.Errorf("docker push failed: %v", err)
+	}
+
+	c.eventCh <- agent.TextDeltaEvent{Text: "✅ Custom toolchain ready.\n"}
+	return customImage, nil
+}
+
+func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customImage string) (WorkerResult, error) {
 	mgr, ok, err := ukc.NewManagerFromEnv()
 	if !ok || err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "UKC_TOKEN not set or invalid for remote coordinator"}, fmt.Errorf("remote coordinator needs UKC_TOKEN")
@@ -290,7 +344,12 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask) (WorkerRe
 		}
 	}
 
-	inst, err := ukc.CreateInstance(ctx, cfg, name, cfg.DefaultImage, 512, env)
+	img := cfg.DefaultImage
+	if customImage != "" {
+		img = customImage
+	}
+
+	inst, err := ukc.CreateInstance(ctx, cfg, name, img, 512, env)
 	if err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
 	}
@@ -511,6 +570,13 @@ func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, d
 		return nil
 	}
 
+	// Get current branch for auto-merge
+	var currentBranch string
+	branchCmd := exec.CommandContext(ctx, "git", "-C", c.workDir, "branch", "--show-current")
+	if out, err := branchCmd.Output(); err == nil {
+		currentBranch = strings.TrimSpace(string(out))
+	}
+
 	// Create new branch
 	branchName := fmt.Sprintf("drover/task-%d-%d", st.Index+1, time.Now().Unix())
 	if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "checkout", "-b", branchName).Run(); err != nil {
@@ -542,7 +608,26 @@ func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, d
 		if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "commit", "-m", fmt.Sprintf("AI Gen: %s", st.Description)).Run(); err != nil {
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to commit changes: %v\n", st.Index+1, err)}
 		} else {
-			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ✅ Workspace merged into branch `%s`\n", st.Index+1, branchName)}
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ✅ Workspace committed to branch `%s`\n", st.Index+1, branchName)}
+			
+			if c.settings.AcceptCmd != "" {
+				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🔄 Running acceptance criteria: %s\n", st.Index+1, c.settings.AcceptCmd)}
+				acceptCmd := exec.CommandContext(ctx, "/bin/sh", "-c", c.settings.AcceptCmd)
+				acceptCmd.Dir = c.workDir
+				if err := acceptCmd.Run(); err != nil {
+					c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] ❌ Acceptance criteria failed: %v. Leaving changes in branch `%s`\n", st.Index+1, err, branchName)}
+				} else {
+					if currentBranch != "" {
+						c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] ✅ Acceptance criteria passed! Auto-merging into `%s`\n", st.Index+1, currentBranch)}
+						if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "checkout", currentBranch).Run(); err == nil {
+							exec.CommandContext(ctx, "git", "-C", c.workDir, "merge", branchName).Run()
+							return nil // successfully merged and checked out
+						}
+					} else {
+						c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] ⚠️ Acceptance passed, but could not determine original branch to auto-merge.\n", st.Index+1)}
+					}
+				}
+			}
 		}
 	}
 
