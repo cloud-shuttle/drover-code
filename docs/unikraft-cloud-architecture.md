@@ -73,3 +73,23 @@ Running complex AI execution graphs remotely can take minutes. If the connection
 
 ### Automated Acceptance & Auto-Merge
 Delegating code generation to the cloud is only useful if it safely integrates back into your local workflow. With the `--accept-cmd` functionality, the orchestrator commits the cloud worker's diff to an isolated Git branch and triggers a local acceptance test (like `cargo test` or `npm run build`). If the tests pass, the remote agent's work is automatically merged into the developer's working branch, creating a completely hands-free, safe CI/CD loop for AI-generated code.
+
+## 7. The Dual-Path Deployment Model: BYOC vs Drover Cloud SaaS
+
+To maximize flexibility and security while providing a frictionless onboarding experience, the architecture is splitting into an **Open-Core / COSS** model. 
+
+### Option 1: "Bring Your Own Cloud" (BYOC)
+For enterprise users and security-conscious teams, `drover-code` will remain a powerful open-source CLI. 
+*   Developers run `drover-code --coordinator-remote` locally.
+*   They provide their own `$UKC_TOKEN` and Anthropic API key.
+*   The local CLI directly provisions Unikraft instances on their personal Kraftcloud account.
+*   **Advantage**: Proprietary code never passes through a third-party Drover server.
+
+### Option 2: Drover Cloud (SaaS Platform)
+For users who want zero-friction onboarding, we introduce the `drover-cloud` SaaS platform.
+*   Developers run `drover-code --cloud`.
+*   The CLI acts as a lightweight client. It compresses the workspace and securely uploads it to `api.drover.cloud`.
+*   The `drover-cloud` backend server handles all the Kraftcloud instance provisioning, custom toolchain building, and LLM API keys under the hood.
+*   **Advantage**: No need to set up Docker registries or Kraftcloud tokens. Enables team billing, centralized web dashboards, and GitHub App integrations for automated PR reviews.
+
+This split ensures that the core orchestration logic remains battle-tested and open, while the SaaS platform handles the heavy lifting of infrastructure management.

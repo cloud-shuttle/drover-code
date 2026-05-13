@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -19,10 +20,11 @@ const DefaultAgentImage = "index.unikraft.io/cloudshuttle/ukc-agent:latest"
 
 // Manager coordinates registry persistence and Kraft Cloud calls.
 type Manager struct {
-	mu      sync.Mutex
-	regPath string
-	entries map[string]Entry
-	cfg     Config
+	mu        sync.Mutex
+	regPath   string
+	entries   map[string]Entry
+	cfg       Config
+	Templates *TemplatesCache
 }
 
 // NewManagerFromEnv returns a Manager when UKC_TOKEN is set.
@@ -48,6 +50,12 @@ func NewManagerFromEnv() (*Manager, bool, error) {
 		return nil, false, err
 	}
 
+	templatesPath := filepath.Join(filepath.Dir(path), "ukc-templates.json")
+	templatesCache, err := NewTemplatesCache(templatesPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to load templates cache: %w", err)
+	}
+
 	cfg := Config{
 		Token:         token,
 		Metro:         metro,
@@ -56,7 +64,7 @@ func NewManagerFromEnv() (*Manager, bool, error) {
 		HTTPClient:    &http.Client{}, // per-call timeouts via context; streams may run until tool timeout
 		MaxHealthWait: 60 * time.Second,
 	}
-	return &Manager{regPath: path, entries: entries, cfg: cfg}, true, nil
+	return &Manager{regPath: path, entries: entries, cfg: cfg, Templates: templatesCache}, true, nil
 }
 
 func (m *Manager) persistLocked() error {

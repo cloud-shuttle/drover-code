@@ -1,0 +1,21 @@
+ drover-code                                                                                        
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  Welcome back user!                 Tips for getting started                                     │
+│                                     Run `/init` to add a project instructions file (CLAUDE.md).  │
+│                                                                                                  │
+│     ▗▄▄▄▖                           Recent activity                                              │
+│   ▗▟█▀▀▜█▙▖                         No recent activity                                           │
+│  ▐█▛  ▗▛██▌                                                                                      │
+│  ▐█▌ ▗▛▗██▌                                                                                      │
+│  ▝█▙▄▟█▛▘                                                                                        │
+│    ▐██▌                                                                                          │
+│    ▐██▌                                                                                          │
+│                                                                                                  │
+│  DROVER CODE                                                                                     │
+│                                                                                                  │
+│  Model: test-model                                                                               │
+│  Project: /tmp/wd                                                                                │
+│  Host: host                                                                                      │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

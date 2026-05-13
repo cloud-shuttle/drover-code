@@ -2,6 +2,7 @@ package ukc
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -14,6 +15,8 @@ func FuzzParseExecStream(f *testing.F) {
 	f.Add([]byte("data: invalid json"))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		ParseExecStream(bytes.NewReader(data))
+		var out strings.Builder
+		lastID := ""
+		ParseExecStreamChunk(bytes.NewReader(data), nil, &out, &lastID)
 	})
 }

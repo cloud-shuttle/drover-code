@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -16,6 +18,10 @@ import (
 
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/convo"
+	"github.com/cloudshuttle/drover-code/internal/tools/fs"
+	"github.com/cloudshuttle/drover-code/internal/tui/diff"
+	"github.com/cloudshuttle/drover-code/internal/tui/history"
+	"github.com/cloudshuttle/drover-code/internal/tui/historysearch"
 )
 
 type renderedTurn struct {
@@ -60,6 +66,12 @@ type Model struct {
 	toolOrder   []int
 	pendingDone []completedTool
 
+	messageQueue []string
+
+	inputHistory *history.PersistentHistory
+	historyIndex int
+	savedInput   string
+
 	textarea     textarea.Model
 	inputFocused bool
 
@@ -69,6 +81,12 @@ type Model struct {
 
 	permPrompt *permissionPrompt
 	permBatch  *permissionBatchPrompt
+
+	diffModel   *diff.Model
+	showingDiff bool
+
+	searchModel   *historysearch.Model
+	showingSearch bool
 
 	glamourRenderer *glamour.TermRenderer
 
@@ -93,8 +111,14 @@ type Model struct {
 	maxHistoryDisplay int
 
 	runFunc   RunFunc
+	runCancel context.CancelFunc
 	compactFn func() error
 	convoMgr  *convo.Manager
+}
+
+// SetRunCancel allows injecting the context cancellation function for the current run
+func (m *Model) SetRunCancel(cancel context.CancelFunc) {
+	m.runCancel = cancel
 }
 
 func New(eventCh <-chan agent.Event, modelName, workDir, userName, hostName string) *Model {
@@ -106,6 +130,11 @@ func New(eventCh <-chan agent.Event, modelName, workDir, userName, hostName stri
 	ta.Focus()
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
 	ta.BlurredStyle.Base = lipgloss.NewStyle()
+
+	hist, err := history.NewPersistentHistory(workDir)
+	if err != nil {
+		hist = &history.PersistentHistory{}
+	}
 
 	return &Model{
 		eventCh:           eventCh,
@@ -119,6 +148,8 @@ func New(eventCh <-chan agent.Event, modelName, workDir, userName, hostName stri
 		autoList:          defaultSlashCommands(),
 		maxGlamourRunes:   readMaxGlamourRunesFromEnv(),
 		maxHistoryDisplay: readMaxHistoryDisplayFromEnv(),
+		inputHistory:      hist,
+		historyIndex:      len(hist.Get()),
 	}
 }
 
@@ -169,6 +200,52 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
+		if m.showingSearch && m.searchModel != nil {
+			var newModel tea.Model
+			var cmd tea.Cmd
+			newModel, cmd = m.searchModel.Update(msg)
+			m.searchModel = newModel.(*historysearch.Model)
+			return m, cmd
+		}
+
+		if m.showingDiff && m.diffModel != nil {
+			var newDiff tea.Model
+			var cmd tea.Cmd
+			newDiff, cmd = m.diffModel.Update(msg)
+			*m.diffModel = newDiff.(diff.Model)
+
+			switch msg.String() {
+			case "q", "esc":
+				m.showingDiff = false
+				m.diffModel = nil
+				m.lastError = "User cancelled interactive diff review."
+				return m, nil
+			case "enter", "ctrl+s":
+				applier := diff.NewPatchApplier(m.workDir)
+				_, err := applier.ApplyAcceptedHunks(
+					m.diffModel.GetFilePath(),
+					m.diffModel.GetHunks(),
+				)
+
+				if err != nil {
+					m.lastError = fmt.Sprintf("Failed to apply diff: %v", err)
+				} else {
+					if m.permPrompt != nil {
+						select {
+						case m.permPrompt.decisionCh <- agent.PermAppliedManually:
+						default:
+						}
+						m.permPrompt = nil
+					}
+				}
+
+				m.showingDiff = false
+				m.diffModel = nil
+				return m, nil
+			}
+			return m, cmd
+		}
+
 		if m.permPrompt != nil {
 			cmd := m.handlePermissionKey(msg)
 			return m, cmd
@@ -180,19 +257,54 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.Type {
 		case tea.KeyCtrlC:
+			if m.agentBusy {
+				if m.runCancel != nil {
+					m.runCancel()
+					m.runCancel = nil
+				}
+				m.lastError = "Interrupting agent... waiting for graceful halt."
+				return m, nil
+			}
 			return m, tea.Quit
+		case tea.KeyCtrlR:
+			if !m.agentBusy {
+				m.searchModel = historysearch.New(m.inputHistory.Get(), m.width, m.height)
+				m.showingSearch = true
+			}
+			return m, nil
 		case tea.KeyEnter:
 			if msg.Alt {
 				break
 			}
-			if !m.agentBusy {
-				input := strings.TrimSpace(m.textarea.Value())
-				if input != "" {
-					m.textarea.Reset()
-					m.showAuto = false
-					m.lastError = ""
-					return m, m.submitInput(input)
+			input := strings.TrimSpace(m.textarea.Value())
+			if input != "" {
+				m.inputHistory.Add(input)
+				m.historyIndex = len(m.inputHistory.Get())
+				m.savedInput = ""
+
+				m.textarea.Reset()
+				m.showAuto = false
+				m.lastError = ""
+				
+				in := strings.ToLower(input)
+				if in == "/quit" || in == "/exit" {
+					return m, tea.Quit
 				}
+				if in == "/history" {
+					if !m.agentBusy {
+						m.searchModel = historysearch.New(m.inputHistory.Get(), m.width, m.height)
+						m.showingSearch = true
+					}
+					return m, nil
+				}
+
+				if m.agentBusy {
+					m.messageQueue = append(m.messageQueue, input)
+					m.rebuildViewport()
+					m.scrollToBottom()
+					return m, nil
+				}
+				return m, m.submitInput(input)
 			}
 			return m, nil
 		case tea.KeyEsc:
@@ -201,11 +313,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showAuto && m.autoIndex > 0 {
 				m.autoIndex--
 				return m, nil
+			} else if !m.showAuto && m.textarea.Line() == 0 {
+				histEntries := m.inputHistory.Get()
+				if len(histEntries) > 0 && m.historyIndex > 0 {
+					if m.historyIndex == len(histEntries) {
+						m.savedInput = m.textarea.Value()
+					}
+					m.historyIndex--
+					m.textarea.SetValue(histEntries[m.historyIndex])
+					m.textarea.CursorEnd()
+					return m, nil
+				}
 			}
 		case tea.KeyDown:
 			if m.showAuto && m.autoIndex < len(m.filteredAuto())-1 {
 				m.autoIndex++
 				return m, nil
+			} else if !m.showAuto && m.textarea.Line() == m.textarea.LineCount()-1 {
+				histEntries := m.inputHistory.Get()
+				if m.historyIndex < len(histEntries) {
+					m.historyIndex++
+					if m.historyIndex == len(histEntries) {
+						m.textarea.SetValue(m.savedInput)
+					} else {
+						m.textarea.SetValue(histEntries[m.historyIndex])
+					}
+					m.textarea.CursorEnd()
+					return m, nil
+				}
 			}
 		case tea.KeyTab:
 			if m.showAuto {
@@ -244,6 +379,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateAutoComplete()
 		return m, tea.Batch(cmds...)
 
+	case historysearch.SelectedMsg:
+		m.textarea.SetValue(msg.Entry)
+		m.textarea.CursorEnd()
+		m.showingSearch = false
+		m.searchModel = nil
+		return m, nil
+
+	case historysearch.CancelMsg:
+		m.showingSearch = false
+		m.searchModel = nil
+		return m, nil
+
 	case agentMsg:
 		cmd := m.handleAgentEvent(msg.event)
 		cmds = append(cmds, waitForEvent(m.eventCh))
@@ -255,9 +402,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentRunCompleteMsg:
 		m.agentBusy = false
 		if msg.err != nil {
-			m.lastError = msg.err.Error()
+			if errors.Is(msg.err, context.Canceled) {
+				m.lastError = "Agent paused by user."
+				m.history = append(m.history, renderedTurn{
+					role:    "system",
+					content: "(/pause) Agent interrupted. Waiting for new instructions...",
+				})
+			} else {
+				m.lastError = msg.err.Error()
+			}
 		}
-		return m, nil
+		
+		for len(m.messageQueue) > 0 && !m.agentBusy {
+			nextInput := m.messageQueue[0]
+			m.messageQueue = m.messageQueue[1:]
+			if cmd := m.submitInput(nextInput); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		
+		return m, tea.Batch(cmds...)
 
 	case compactCompleteMsg:
 		m.agentBusy = false
@@ -273,7 +437,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuildViewport()
 		m.scrollToBottom()
-		return m, waitForEvent(m.eventCh)
+
+		cmds = append(cmds, waitForEvent(m.eventCh))
+		for len(m.messageQueue) > 0 && !m.agentBusy {
+			nextInput := m.messageQueue[0]
+			m.messageQueue = m.messageQueue[1:]
+			if cmd := m.submitInput(nextInput); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		
+		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
 		for idx, at := range m.activeTools {
@@ -332,6 +506,25 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 		}
 
 	case agent.PermissionRequestEvent:
+		if e.ToolName == "edit_file" {
+			filePath, diffStr, err := fs.PreviewEdit(m.workDir, e.Input)
+			if err == nil && diffStr != "" && diffStr != "no changes" {
+				dm := diff.NewDiffModel(filePath, diffStr)
+				m.diffModel = &dm
+				m.showingDiff = true
+				
+				m.permPrompt = &permissionPrompt{
+					toolName:   e.ToolName,
+					summary:    e.Summary,
+					inputJSON:  e.Input,
+					decisionCh: e.DecisionCh,
+				}
+				m.permBatch = nil
+				m.scrollToBottom()
+				return nil
+			}
+		}
+
 		m.permPrompt = &permissionPrompt{
 			toolName:   e.ToolName,
 			summary:    e.Summary,
@@ -386,12 +579,19 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 		m.streaming = false
 		m.agentBusy = false
 
+		if len(m.messageQueue) > 0 {
+			nextInput := m.messageQueue[0]
+			m.messageQueue = m.messageQueue[1:]
+			return m.submitInput(nextInput)
+		}
+
 		m.rebuildViewport()
 		m.scrollToBottom()
 
 	case agent.ErrorEvent:
 		m.lastError = e.Err.Error()
 		m.agentBusy = false
+		m.messageQueue = nil // Clear the queue on error
 		m.streaming = false
 		m.streamBuf.Reset()
 		m.streamLines = ""
@@ -606,6 +806,7 @@ func defaultSlashCommands() []slashItem {
 		{"compact", "summarise and compress context"},
 		{"model", "switch model"},
 		{"tokens", "show token usage"},
+		{"history", "search command history"},
 	}
 }
 
@@ -738,3 +939,15 @@ func (m *Model) SetRunFunc(fn RunFunc) { m.runFunc = fn }
 func (m *Model) SetCompactFn(fn func() error) { m.compactFn = fn }
 
 func (m *Model) SetConversation(mgr *convo.Manager) { m.convoMgr = mgr }
+
+// RegisterCustomCommands adds custom commands to the auto-complete list.
+func (m *Model) RegisterCustomCommands(names, descs []string) {
+	for i, name := range names {
+		desc := ""
+		if i < len(descs) {
+			desc = descs[i]
+		}
+		m.autoList = append(m.autoList, slashItem{name: name, desc: desc})
+	}
+}
+

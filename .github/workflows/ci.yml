@@ -13,10 +13,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - name: Test (unit + property tests via testing/quick)
+      - name: Test (Unit, Snapshot, and E2E)
         env:
           CGO_ENABLED: "0"
-        run: go test ./...
+          TERM: xterm-256color
+        run: |
+          go test -v -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | grep total
       - name: Build
         env:
           CGO_ENABLED: "0"
@@ -53,3 +56,5 @@ jobs:
           run_fuzz tuiPermPrompt internal/tui FuzzModel_permissionPromptKeys
           run_fuzz tuiPermBatch internal/tui FuzzModel_permissionBatchKeys
           run_fuzz parseExecStream internal/tools/ukc FuzzParseExecStream
+          run_fuzz templateExpander internal/commands FuzzTemplateExpander
+          run_fuzz parseMarkdownCmd internal/commands FuzzParseMarkdownCommand

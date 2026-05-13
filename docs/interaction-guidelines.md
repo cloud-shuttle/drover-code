@@ -37,7 +37,7 @@ When a user says:
 
 ## Context Continuity
 
-- Read `INTERACTION_GUIDELINES.md` at the start of each conversation about drover-code work
+- Read `interaction-guidelines.md` at the start of each conversation about drover-code work
 - Check `git_status` before committing to understand what's staged
 - Review recent commits with `git_log` to understand project momentum
 - When resuming work, scan the most recent design doc or TODO file for context

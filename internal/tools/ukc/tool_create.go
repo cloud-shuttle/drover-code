@@ -24,6 +24,7 @@ func (t *Create) InputSchema() json.RawMessage {
 	return toolutil.NewSchema("object").
 		Prop("name", toolutil.NewSchema("string").Desc("Unique name for the instance (DNS label)")).
 		Prop("image", toolutil.NewSchema("string").Desc("OCI image (default: UKC_DEFAULT_AGENT_IMAGE or built-in default)")).
+		Prop("environment", toolutil.NewSchema("string").Desc("Optional language environment to boot (e.g., rust, node, python, go). Replaces 'image' with the cached template ID if provided.")).
 		Prop("memory_mb", toolutil.NewSchema("integer").Desc("Memory in MB (optional; cloud default applies if unset)")).
 		Required("name").
 		Build()
@@ -31,9 +32,10 @@ func (t *Create) InputSchema() json.RawMessage {
 func (t *Create) NeedsPermission(_ json.RawMessage) bool { return true }
 
 type createInput struct {
-	Name     string `json:"name"`
-	Image    string `json:"image"`
-	MemoryMB int    `json:"memory_mb"`
+	Name        string `json:"name"`
+	Image       string `json:"image"`
+	Environment string `json:"environment"`
+	MemoryMB    int    `json:"memory_mb"`
 }
 
 func (t *Create) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -48,8 +50,21 @@ func (t *Create) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	if in.Name == "" {
 		return "", fmt.Errorf("ukc_create: name is required")
 	}
+
 	image := strings.TrimSpace(in.Image)
-	if image == "" {
+	in.Environment = strings.ToLower(strings.TrimSpace(in.Environment))
+
+	if in.Environment != "" {
+		if t.M.Templates == nil {
+			return "", fmt.Errorf("ukc_create: templates cache is not initialized")
+		}
+		templateID, ok := t.M.Templates.Get(in.Environment)
+		if !ok {
+			return "", fmt.Errorf("ukc_create: template for environment %q not found. Please run ukc_build_template first to build it.", in.Environment)
+		}
+		// When booting from a template, the template UUID is passed in place of the image
+		image = templateID
+	} else if image == "" {
 		image = t.M.cfg.DefaultImage
 	}
 

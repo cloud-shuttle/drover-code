@@ -92,6 +92,7 @@ const (
 	PermAllow PermissionDecision = iota
 	PermAlwaysAllow
 	PermDeny
+	PermAppliedManually
 )
 
 func (PermissionRequestEvent) isAgentEvent() {}

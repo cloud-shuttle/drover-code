@@ -605,6 +605,25 @@ type Event interface {
 
 ---
 
+## 14. CUSTOM COMMANDS SYSTEM (`internal/commands`)
+
+**Status:** ✅ IMPLEMENTED
+
+**Responsibilities:**
+- Load command definitions from Markdown (frontmatter) and JSON configuration
+- Expand variables (`$1`, `$ARGUMENTS`), placeholders (`{var}`), file contents (`@file.txt`), and inline shell execution (``!`cmd` ``)
+- Evaluate operations through `guardclient` for risk and policy governance
+- Provide an `Executor` for TUI and Headless environments to evaluate custom inputs
+
+**Key Modules:**
+- `types.go`: `CommandDefinition` and `CommandRegistry`
+- `parser.go`: Frontmatter and JSON parsing
+- `loader.go`: Directory traversal and configuration injection
+- `expander.go`: Regex-based prompt expansion
+- `executor.go`: Integration of template expansion and Drover Guard evaluation
+
+---
+
 ## 14. UNIKRAFT CLOUD AGENT (`cmd/ukc-agent`)
 
 ### 14.1 Workspace Sync Endpoint (`/workspace`)

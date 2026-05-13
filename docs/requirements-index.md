@@ -31,7 +31,7 @@ This index guides you through four comprehensive documents that completely speci
 
 ---
 
-### 2. **IMPLEMENTATION_REQUIREMENTS.md** (Complete Reference — 880 lines)
+### 2. **implementation-requirements.md** (Complete Reference — 880 lines)
 
 **Purpose:** Exhaustive module-by-module breakdown  
 **Read this for:** Implementation status, dependencies, contracts, testing strategy  
@@ -69,7 +69,7 @@ This index guides you through four comprehensive documents that completely speci
 
 ---
 
-### 3. **ARCHITECTURE_OVERVIEW.md** (Visual Guide — 585 lines)
+### 3. **architecture-overview.md** (Visual Guide — 585 lines)
 
 **Purpose:** Visual representation of how everything fits together  
 **Read this for:** Data flows, system interactions, architectural patterns  
@@ -96,7 +96,7 @@ This index guides you through four comprehensive documents that completely speci
 
 ---
 
-### 4. **INTEGRATION_CHECKLIST.md** (Developer Guide — 565 lines)
+### 4. **integration-checklist.md** (Developer Guide — 565 lines)
 
 **Purpose:** Practical, step-by-step guide for extending the system  
 **Read this for:** How to add features, implementation patterns, best practices  
@@ -130,60 +130,60 @@ This index guides you through four comprehensive documents that completely speci
 
 ### For Onboarding
 1. Start: **REQUIREMENTS_SUMMARY.txt** (15 min)
-2. Then: **ARCHITECTURE_OVERVIEW.md** (25 min)
-3. Deep dive: Relevant sections of **IMPLEMENTATION_REQUIREMENTS.md** (10-30 min)
+2. Then: **architecture-overview.md** (25 min)
+3. Deep dive: Relevant sections of **implementation-requirements.md** (10-30 min)
 
 ### For Adding a New Tool
-1. Read: **INTEGRATION_CHECKLIST.md** → "Adding a New Tool" section
+1. Read: **integration-checklist.md** → "Adding a New Tool" section
 2. Reference: **REQUIREMENTS_SUMMARY.txt** → 18 Production Tools section
 3. Example: Look at existing tool in `internal/tools/git/` or `internal/tools/fs/`
 
 ### For Understanding Agent Loop
-1. Read: **ARCHITECTURE_OVERVIEW.md** → "Data Flow" section
-2. Detailed: **IMPLEMENTATION_REQUIREMENTS.md** → Agent Loop section
+1. Read: **architecture-overview.md** → "Data Flow" section
+2. Detailed: **implementation-requirements.md** → Agent Loop section
 3. Verify: `internal/agent/loop.go` in actual code
 
 ### For System Architecture
-1. Diagram: **ARCHITECTURE_OVERVIEW.md** → Module Dependency Graph
-2. Details: **IMPLEMENTATION_REQUIREMENTS.md** → Integration Points Matrix
+1. Diagram: **architecture-overview.md** → Module Dependency Graph
+2. Details: **implementation-requirements.md** → Integration Points Matrix
 3. Implementation: Check actual code files
 
 ### For Extending Functionality
-1. Pattern: **INTEGRATION_CHECKLIST.md** → relevant feature section
-2. Reference: Related sections in **IMPLEMENTATION_REQUIREMENTS.md**
-3. Context: **ARCHITECTURE_OVERVIEW.md** → relevant data flow
+1. Pattern: **integration-checklist.md** → relevant feature section
+2. Reference: Related sections in **implementation-requirements.md**
+3. Context: **architecture-overview.md** → relevant data flow
 4. Code: Examine similar implementation in codebase
 
 ### For Troubleshooting
 1. Environment: **REQUIREMENTS_SUMMARY.txt** → Environment Variables section
-2. Issues: **INTEGRATION_CHECKLIST.md** → Configuration Troubleshooting
-3. Details: **IMPLEMENTATION_REQUIREMENTS.md** → specific module section
+2. Issues: **integration-checklist.md** → Configuration Troubleshooting
+3. Details: **implementation-requirements.md** → specific module section
 
 ---
 
 ## 🏗️ Document Cross-References
 
 ### REQUIREMENTS_SUMMARY.txt Links to:
-- 18 Production Tools → Detailed specs in IMPLEMENTATION_REQUIREMENTS.md
-- Core Modules → Full module specs in IMPLEMENTATION_REQUIREMENTS.md
-- Data Flow → Detailed diagrams in ARCHITECTURE_OVERVIEW.md
-- Critical Points → Implementation checklist items in INTEGRATION_CHECKLIST.md
+- 18 Production Tools → Detailed specs in implementation-requirements.md
+- Core Modules → Full module specs in implementation-requirements.md
+- Data Flow → Detailed diagrams in architecture-overview.md
+- Critical Points → Implementation checklist items in integration-checklist.md
 
-### IMPLEMENTATION_REQUIREMENTS.md Links to:
+### implementation-requirements.md Links to:
 - Testing Strategy → Test types explained in architecture doc
-- Integration Points Matrix → Visual representations in ARCHITECTURE_OVERVIEW.md
-- Module responsibilities → Data flows in ARCHITECTURE_OVERVIEW.md
-- Implementation details → Step-by-step guides in INTEGRATION_CHECKLIST.md
+- Integration Points Matrix → Visual representations in architecture-overview.md
+- Module responsibilities → Data flows in architecture-overview.md
+- Implementation details → Step-by-step guides in integration-checklist.md
 
-### ARCHITECTURE_OVERVIEW.md Links to:
-- Visual diagrams → Textual specs in IMPLEMENTATION_REQUIREMENTS.md
+### architecture-overview.md Links to:
+- Visual diagrams → Textual specs in implementation-requirements.md
 - Data flows → Implementation in specific modules
-- Testing layers → Test types defined in INTEGRATION_CHECKLIST.md
-- Integration patterns → Step-by-step guides in INTEGRATION_CHECKLIST.md
+- Testing layers → Test types defined in integration-checklist.md
+- Integration patterns → Step-by-step guides in integration-checklist.md
 
-### INTEGRATION_CHECKLIST.md Links to:
-- Step-by-step guides → Architecture patterns in ARCHITECTURE_OVERVIEW.md
-- Module changes → Specs in IMPLEMENTATION_REQUIREMENTS.md
+### integration-checklist.md Links to:
+- Step-by-step guides → Architecture patterns in architecture-overview.md
+- Module changes → Specs in implementation-requirements.md
 - Code examples → Existing implementations in `internal/`
 - Build steps → Build targets in REQUIREMENTS_SUMMARY.txt
 
@@ -250,9 +250,9 @@ All documents explain these critical decisions:
 | Document | Primary Purpose | Read Time | Best For |
 |----------|---|---|---|
 | REQUIREMENTS_SUMMARY.txt | Quick reference & overview | 15 min | Onboarding, quick lookups |
-| IMPLEMENTATION_REQUIREMENTS.md | Complete specification | 30 min | Implementation details, contracts |
-| ARCHITECTURE_OVERVIEW.md | Visual system design | 25 min | Understanding interactions |
-| INTEGRATION_CHECKLIST.md | Developer guide & patterns | 20 min | Adding features, maintaining |
+| implementation-requirements.md | Complete specification | 30 min | Implementation details, contracts |
+| architecture-overview.md | Visual system design | 25 min | Understanding interactions |
+| integration-checklist.md | Developer guide & patterns | 20 min | Adding features, maintaining |
 
 **Total reading time for complete understanding:** ~90 minutes  
 **Total reading time for quick start:** ~15 minutes (summary only)
@@ -263,20 +263,20 @@ All documents explain these critical decisions:
 
 ### Path 1: Quick Start (15 minutes)
 1. Read **REQUIREMENTS_SUMMARY.txt**
-2. Review **ARCHITECTURE_OVERVIEW.md** data flow diagrams
+2. Review **architecture-overview.md** data flow diagrams
 3. You're ready to explore the code
 
 ### Path 2: Deep Dive (90 minutes)
 1. Read **REQUIREMENTS_SUMMARY.txt** (15 min)
-2. Study **IMPLEMENTATION_REQUIREMENTS.md** (30 min)
-3. Review **ARCHITECTURE_OVERVIEW.md** (25 min)
-4. Browse **INTEGRATION_CHECKLIST.md** (20 min)
+2. Study **implementation-requirements.md** (30 min)
+3. Review **architecture-overview.md** (25 min)
+4. Browse **integration-checklist.md** (20 min)
 5. Explore code with understanding
 
 ### Path 3: Implementation-Focused (40 minutes)
 1. Read **REQUIREMENTS_SUMMARY.txt** (15 min)
-2. Jump to **INTEGRATION_CHECKLIST.md** relevant section (15 min)
-3. Reference **ARCHITECTURE_OVERVIEW.md** as needed (10 min)
+2. Jump to **integration-checklist.md** relevant section (15 min)
+3. Reference **architecture-overview.md** as needed (10 min)
 4. Start implementing
 
 ---
@@ -288,10 +288,10 @@ All documents are in the repository root:
 ```
 /workspace/
 ├── REQUIREMENTS_SUMMARY.txt          (executive summary)
-├── IMPLEMENTATION_REQUIREMENTS.md    (detailed specs)
-├── ARCHITECTURE_OVERVIEW.md          (visual guide)
-├── INTEGRATION_CHECKLIST.md          (developer guide)
-├── REQUIREMENTS_INDEX.md             (this file)
+├── implementation-requirements.md    (detailed specs)
+├── architecture-overview.md          (visual guide)
+├── integration-checklist.md          (developer guide)
+├── requirements-index.md             (this file)
 ├── internal/                         (implementation)
 │   ├── api/
 │   ├── agent/
@@ -318,23 +318,23 @@ All documents are in the repository root:
 ## 💡 Tips for Using These Documents
 
 ### As a Developer
-- **Bookmark INTEGRATION_CHECKLIST.md** for quick access when adding features
-- **Keep ARCHITECTURE_OVERVIEW.md open** while reading code to understand flow
-- **Reference IMPLEMENTATION_REQUIREMENTS.md** for API contracts
+- **Bookmark integration-checklist.md** for quick access when adding features
+- **Keep architecture-overview.md open** while reading code to understand flow
+- **Reference implementation-requirements.md** for API contracts
 
 ### As a Reviewer
 - **Check against REQUIREMENTS_SUMMARY.txt** for consistency with design
-- **Verify integration points** using ARCHITECTURE_OVERVIEW.md
-- **Ensure tests match** INTEGRATION_CHECKLIST.md patterns
+- **Verify integration points** using architecture-overview.md
+- **Ensure tests match** integration-checklist.md patterns
 
 ### As a Maintainer
-- **Use IMPLEMENTATION_REQUIREMENTS.md** to track implementation status
-- **Consult INTEGRATION_CHECKLIST.md** before approving new features
+- **Use implementation-requirements.md** to track implementation status
+- **Consult integration-checklist.md** before approving new features
 - **Keep these docs in sync** with actual code changes
 
 ### As an Evaluator
 - **Start with REQUIREMENTS_SUMMARY.txt** for high-level view
-- **Check status indicators** in IMPLEMENTATION_REQUIREMENTS.md
+- **Check status indicators** in implementation-requirements.md
 - **Review test coverage** in testing strategy sections
 
 ---
@@ -349,10 +349,10 @@ These documents should be updated when:
 5. New design patterns emerge (update overview + checklist)
 
 **Sync checklist:**
-- [ ] Update status indicators in IMPLEMENTATION_REQUIREMENTS.md
+- [ ] Update status indicators in implementation-requirements.md
 - [ ] Update module count in REQUIREMENTS_SUMMARY.txt
-- [ ] Update diagrams in ARCHITECTURE_OVERVIEW.md if topology changes
-- [ ] Add new patterns to INTEGRATION_CHECKLIST.md
+- [ ] Update diagrams in architecture-overview.md if topology changes
+- [ ] Add new patterns to integration-checklist.md
 - [ ] Run tests: `CGO_ENABLED=0 go test ./...`
 - [ ] Verify all files build: `CGO_ENABLED=0 go build ./cmd/...`
 
@@ -361,22 +361,22 @@ These documents should be updated when:
 ## ❓ FAQ
 
 **Q: Where do I start if I want to add a new tool?**  
-A: Go to INTEGRATION_CHECKLIST.md → "Adding a New Tool" section. It's step-by-step with code examples.
+A: Go to integration-checklist.md → "Adding a New Tool" section. It's step-by-step with code examples.
 
 **Q: How do I understand how everything connects?**  
-A: Read ARCHITECTURE_OVERVIEW.md, especially the module dependency graph and data flow sections.
+A: Read architecture-overview.md, especially the module dependency graph and data flow sections.
 
 **Q: What's the status of feature X?**  
-A: Check REQUIREMENTS_SUMMARY.txt first (quick), then IMPLEMENTATION_REQUIREMENTS.md (detailed).
+A: Check REQUIREMENTS_SUMMARY.txt first (quick), then implementation-requirements.md (detailed).
 
 **Q: What tests should I write for my change?**  
-A: See INTEGRATION_CHECKLIST.md → "Testing Integration Points" for templates and patterns.
+A: See integration-checklist.md → "Testing Integration Points" for templates and patterns.
 
 **Q: Where's the TUI implementation?**  
-A: See IMPLEMENTATION_REQUIREMENTS.md → section 11, then look in `internal/tui/`.
+A: See implementation-requirements.md → section 11, then look in `internal/tui/`.
 
 **Q: How do I add a new permission preset?**  
-A: INTEGRATION_CHECKLIST.md → "Adding a Permission Preset" section.
+A: integration-checklist.md → "Adding a Permission Preset" section.
 
 **Q: What environment variables are available?**  
 A: REQUIREMENTS_SUMMARY.txt → "Environment Variables Quick Reference" section.
@@ -401,9 +401,9 @@ TOTAL                        2,517  17,000  77.5K
 ## 🎯 Next Steps
 
 1. **If onboarding:** Start with REQUIREMENTS_SUMMARY.txt
-2. **If extending:** Go to INTEGRATION_CHECKLIST.md
-3. **If learning:** Read ARCHITECTURE_OVERVIEW.md
-4. **If implementing:** Use IMPLEMENTATION_REQUIREMENTS.md
+2. **If extending:** Go to integration-checklist.md
+3. **If learning:** Read architecture-overview.md
+4. **If implementing:** Use implementation-requirements.md
 5. **If maintaining:** Check all 4 periodically
 
 ---

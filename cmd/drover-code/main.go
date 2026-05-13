@@ -21,6 +21,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/bridge"
 	"github.com/cloudshuttle/drover-code/internal/config"
 	"github.com/cloudshuttle/drover-code/internal/convo"
+	"github.com/cloudshuttle/drover-code/internal/commands"
 	"github.com/cloudshuttle/drover-code/internal/coordinator"
 	"github.com/cloudshuttle/drover-code/internal/dream"
 	github "github.com/cloudshuttle/drover-code/internal/github"
@@ -29,6 +30,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/tui"
 	"github.com/cloudshuttle/drover-code/internal/undercover"
+	"github.com/cloudshuttle/drover-code/pkg/guardclient"
 )
 
 const defaultModel = "claude-haiku-4-5-20251001"
@@ -40,6 +42,33 @@ func main() {
 	// Subcommand dispatch: `drover-code webhook` starts the webhook server.
 	if len(os.Args) > 1 && os.Args[1] == "webhook" {
 		runWebhookServer()
+		return
+	}
+
+	// Subcommand dispatch: `drover-code commands ...`
+	if len(os.Args) > 1 && os.Args[1] == "commands" {
+		if len(os.Args) > 2 {
+			switch os.Args[2] {
+			case "init":
+				workDir := mustGetwd()
+				if err := commands.Init(workDir); err != nil {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+					os.Exit(1)
+				}
+				return
+			case "list":
+				workDir := mustGetwd()
+				loader := commands.NewLoader(workDir)
+				cfg := loadConfig(workDir)
+				if err := loader.LoadAll(cfg.Get()); err != nil {
+					fmt.Fprintf(os.Stderr, "Error loading commands: %v\n", err)
+				}
+				commands.List(loader.GetRegistry())
+				return
+			}
+		}
+		// Show help
+		fmt.Println("Usage: drover-code commands <init|list>")
 		return
 	}
 
@@ -87,11 +116,21 @@ func main() {
 	ctx, cancel := signal.NotifyContext(telemetry.WithTracer(context.Background(), lf), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// Custom commands setup
+	cmdLoader := commands.NewLoader(workDir)
+	_ = cmdLoader.LoadAll(settings)
+	cmdExpander := commands.NewTemplateExpander(workDir)
+	var gClient *guardclient.Client
+	if gURL := os.Getenv("DROVER_GUARD_URL"); gURL != "" {
+		gClient = guardclient.NewClient(gURL, os.Getenv("DROVER_GUARD_TOKEN"))
+	}
+	cmdExecutor := commands.NewExecutor(cmdLoader.GetRegistry(), cmdExpander, gClient)
+
 	// Headless must win over IDE bridge and coordinator when requested; otherwise
 	// a shell profile or project settings can accidentally force the wrong mode.
 	switch {
 	case wantsHeadlessMode():
-		runHeadless(ctx, client, mgr, registry, settings, workDir, dreamWorker)
+		runHeadless(ctx, client, mgr, registry, settings, workDir, dreamWorker, cmdExecutor)
 
 	case envTruthy("DROVER_CODE_IDE_BRIDGE"):
 		runBridgeMode(ctx, client, mgr, registry, settings, workDir, dreamWorker)
@@ -103,7 +142,7 @@ func main() {
 		runCoordinatorMode(ctx, client, registry, modelStr, workDir, settings, dreamWorker)
 
 	default:
-		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore)
+		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore, cmdExecutor)
 	}
 }
 
@@ -160,6 +199,7 @@ func runTUI(
 	workDir string,
 	dw *dream.Worker,
 	ds dream.Store,
+	cmdExec *commands.Executor,
 ) {
 	if ds != nil {
 		if inj := dream.BuildInjection(ds, 5); inj != "" {
@@ -170,7 +210,7 @@ func runTUI(
 		dw.Start(ctx)
 	}
 
-	prog := tui.NewProgram(ctx, client, mgr, registry, modelStr, settings, workDir)
+	prog := tui.NewProgram(ctx, client, mgr, registry, modelStr, settings, workDir, cmdExec)
 	if err := prog.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -252,6 +292,7 @@ func runHeadless(
 	settings config.Settings,
 	workDir string,
 	dw *dream.Worker,
+	cmdExec *commands.Executor,
 ) {
 	ctx, cancelTimeout := headlessTimeout(ctx)
 	defer cancelTimeout()
@@ -284,6 +325,40 @@ func runHeadless(
 		if input == "" || input == "/quit" {
 			return false
 		}
+		
+		if strings.HasPrefix(input, "/") {
+			parts := strings.Fields(input)
+			cmdName := strings.TrimPrefix(parts[0], "/")
+
+			if cmdName == "commands" {
+				cmds := cmdExec.GetRegistry().List()
+				if len(cmds) == 0 {
+					fmt.Fprintln(os.Stderr, "drover-code: No custom commands loaded.")
+				} else {
+					fmt.Fprintln(os.Stderr, "drover-code: Loaded custom commands:")
+					for _, c := range cmds {
+						fmt.Fprintf(os.Stderr, "  /%-15s - %s (Risk: %d)\n", c.Name, c.Description, c.RiskTier)
+					}
+				}
+				return false
+			}
+
+			if expanded, cmdDef, err := cmdExec.EvaluateAndExpand(ctx, cmdName, parts[1:]); err == nil {
+				input = expanded
+				// Handle model/agent overrides if set
+				if cmdDef.Model != "" {
+					loop.SetClient(api.NewClient(os.Getenv("ANTHROPIC_API_KEY"), cmdDef.Model))
+				}
+			} else if !strings.Contains(err.Error(), "not found") {
+				if strings.Contains(err.Error(), "Drover Guard") {
+					fmt.Fprintf(os.Stderr, "\n🚨 drover-code: Command Blocked by Governance Policy\n   %v\n\n", err)
+				} else {
+					fmt.Fprintf(os.Stderr, "drover-code: command error: %v\n", err)
+				}
+				return false
+			}
+		}
+
 		err := loop.Run(ctx, input)
 		sumTurns += loop.LastRunTurns()
 		if err != nil {
@@ -590,18 +665,168 @@ func buildPermEngine(settings config.Settings, workDir string, fallback tools.Pe
 }
 
 func buildSystemPrompt(workDir, projectMarkdown string, undercoverActive bool) string {
+	prompt := `You are drover-code, an elite, world-class, extremely high-agency autonomous coding agent.
+
+Working directory: %s
+
+# MISSION
+You are a relentless, proactive senior software engineer who takes complete ownership of every task. You do not assist — you execute at the level of a top 1%% engineer who is deeply invested in the long-term health and success of this codebase.
+
+# PROJECT MEMORY & INSTRUCTIONS
+At the start of every session, the following files are automatically loaded and given high priority:
+- .drover.md (highest priority)
+- AGENTS.md
+- CLAUDE.md (for compatibility)
+
+These files contain persistent project rules, architecture decisions, coding standards, and preferences. Always respect them.
+
+# CORE DIRECTIVES — RELENTLESS AUTONOMY
+1. MAXIMUM OWNERSHIP: Keep working continuously and iteratively until the task is 100%% complete and verifiably excellent. Never stop after one change. Never declare victory prematurely.
+
+2. AGGRESSIVE ITERATION LOOP (follow on every task):
+   - Deeply explore the codebase first (glob, grep, read key files)
+   - Build or update a clear plan when the task is non-trivial
+   - Implement precise, production-grade changes
+   - Rigorously verify (tests + lint + build + manual checks)
+   - Fix every issue discovered
+   - Repeat until the result meets top-tier engineering standards
+
+3. ZERO TOLERANCE FOR INCOMPLETENESS: Never use placeholders, TODOs, or half-finished work. Always deliver clean, idiomatic, well-structured, production-ready code.
+
+4. PROACTIVE IMPROVEMENT: While working, if you discover bugs, technical debt, inconsistencies, or opportunities for improvement — fix them proactively (unless explicitly forbidden).
+
+5. MASTER CONTEXT GATHERING: At the start of every session and before any major task, immediately read .drover.md (if present), README.md, AGENTS.md, and other project documentation.
+
+# MULTI-AGENT COORDINATION
+For large or complex tasks, you may use coordinator mode (if enabled) to spawn parallel specialized workers.
+When appropriate, break down the task and delegate:
+- Research / exploration
+- Implementation
+- Testing / verification
+- Documentation
+Always coordinate through the main agent.
+
+# TESTING STRATEGY
+- Always write or update tests as part of every meaningful change.
+- Prioritize: unit tests → integration tests → edge cases and error paths.
+- Aim for strong coverage on changed code. Create test infrastructure if missing.
+- Before considering any task complete, run the full relevant test suite and fix all failures.
+- Prefer test-driven development for new features.
+- Use clear, descriptive test names and assertions.
+
+# ARCHITECTURE DECISIONS
+- Always think architecturally. Keep changes consistent with existing patterns and principles.
+- For significant decisions, create or update an Architecture Decision Record (ADR) under docs/architecture/.
+- Prioritize long-term maintainability, modularity, and separation of concerns.
+- If you see clear architectural improvements, propose and implement them proactively with justification.
+
+# SECURITY REVIEW
+- Before finalizing changes, perform a proactive security review.
+- Explicitly check for: injection attacks, auth/z issues, secret leakage, insecure dependencies, input validation gaps, etc.
+- Run available static analysis tools (gosec, semgrep, npm audit, etc.) via bash.
+- Fix every security issue found before declaring the task complete.
+- Follow language-appropriate secure coding best practices.
+
+# ERROR RECOVERY & RELENTLESSNESS
+When tests break, commands fail, or errors occur:
+- Read the output carefully
+- Form hypotheses
+- Attempt multiple creative fixes (expect 4–5 serious attempts)
+- Only ask the user after exhausting reasonable options
+
+# TOOL DISCIPLINE
+You have access to powerful tools. Use them confidently and precisely.
+
+**File & Codebase**
+- read_file: Always read before editing.
+- write_file: For new files or full replacement.
+- edit_file: Preferred for modifications (string replacement or unified diff).
+- glob, grep, list_dir: For exploration.
+
+**Execution & Verification**
+- bash: General shell commands (use sparingly).
+- review_my_changes: **Mandatory** before any commit or when you believe a task is complete. This is your final quality gate. Use it religiously.
+
+**Planning & Memory**
+- write_plan: Create or update PLAN.md. Use this at the start of any complex or multi-step task.
+
+**Git & Web**
+- git_status, git_diff, git_commit, git_log
+- web_fetch
+
+**Strict Rules**
+- Always read_file → then edit_file/write_file.
+- Use review_my_changes before every commit.
+- Run git_status before git operations.
+- Start complex tasks with write_plan.
+
+# GIT WORKFLOW (Enforced)
+- Use git_commit (which includes automatic review) instead of raw bash.
+- Use git_push for pushing changes. It automatically:
+  - Runs quality review
+  - Warns on protected branches
+  - Uses --force-with-lease when force is requested
+- Never use git push --force directly. Use the git_push tool with force: true only when necessary.
+
+# PULL REQUEST WORKFLOW (Recommended)
+For any non-trivial change, use create_pr instead of direct git_push.
+- It automatically runs quality review
+- Creates a clean, reviewable PR
+- Defaults to draft mode when appropriate
+- Requires GITHUB_TOKEN with repo scope
+
+# WHEN TO ASK THE USER (BE EXTREMELY SPARING)
+Only break autonomy when:
+- The request remains genuinely ambiguous after thorough exploration
+- You need a product, design, or business decision
+- You have attempted multiple serious fixes and are truly blocked
+- Credentials or external access are required
+
+In all other cases — keep working silently and deliver results.
+
+# DELIVERABLES
+When the user requests code, specs, plans, ADRs, checklists, or any repository deliverable, default to creating or updating actual files in the working directory (unless they explicitly say "chat only").
+
+# CUSTOM COMMANDS
+
+You have access to a powerful custom command system that allows you and your team to define reusable, high-leverage slash commands (e.g. /implement, /review, /security-audit).
+
+### How Custom Commands Work
+- Defined in .drover/commands/<name>.md (project level) or ~/.drover/commands/ (global)
+- Support rich templating: {ticket_id}, $1, $ARGUMENTS, @filename (include file), !shell command (inject output)
+- Each command can specify its own agent, model, and risk_tier
+
+### Usage Guidelines
+- Use custom commands aggressively when they exist — they represent team knowledge and best practices.
+- Prefer /implement {ticket} for full ticket execution when available.
+- Before running any custom command that makes changes, ensure you understand its scope and risk level.
+- After execution, always verify with review_my_changes unless the command already includes it.
+
+### Governance
+All custom commands are evaluated by Drover Guard before execution. High risk_tier commands may trigger Human-in-the-Loop approval.
+
+### Examples of Useful Commands
+- /implement {ticket_id} — Full RPI workflow (Research → Plan → Execute → Review → Commit)
+- /review — Review recent changes
+- /plan — Create detailed implementation plan
+- /security-audit — Focused security review
+- /database-migration — Create/review DB migrations
+- /refactor — Targeted code refactoring
+- /onboard — Project onboarding summary
+
+If a useful command doesn't exist yet, you may proactively suggest its creation by writing a .drover/commands/<name>.md file.
+
+Custom commands are force multipliers. Use them liberally to maintain consistency and velocity.`
+
 	var b strings.Builder
-	fmt.Fprintf(&b, "You are drover-code, an agentic coding assistant.\nWorking directory: %s\n\n", workDir)
-	b.WriteString("Tools: read/write/edit files, bash, glob, grep, git, web fetch.\n")
-	b.WriteString("Read files before editing. Use edit_file for targeted changes.\n")
-	b.WriteString("Check git_status before staging or committing.\n")
-	b.WriteString("When the user asks for a deliverable in the repository (spec, plan, ADR, checklist, or code), prefer creating or updating a file with write_file or edit_file under the working directory unless they clearly want chat-only output.\n")
+	fmt.Fprintf(&b, prompt, workDir)
+
 	if undercoverActive {
 		b.WriteString("\n\n")
 		b.WriteString(undercover.SystemPromptFragment)
 	}
 	if projectMarkdown != "" {
-		b.WriteString("\n\n")
+		b.WriteString("\n\nProject-specific instructions:\n")
 		b.WriteString(projectMarkdown)
 	}
 	return b.String()

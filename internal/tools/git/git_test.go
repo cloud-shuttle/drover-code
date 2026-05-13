@@ -115,7 +115,7 @@ func TestGitTools_DiffAndCommitValidation(t *testing.T) {
 		t.Fatalf("expected clean tree no changes, got:\n%s", out)
 	}
 
-	_, err = (&Commit{WorkDir: dir}).Execute(ctx, mustJSON(t, map[string]any{"message": ""}))
+	_, err = NewCommitTool(dir).Execute(ctx, mustJSON(t, map[string]any{"message": ""}))
 	if err == nil {
 		t.Fatal("expected empty commit message error")
 	}
@@ -161,7 +161,7 @@ func TestGitTools_AddSecondCommitAndBranch(t *testing.T) {
 	if _, err := ad.Execute(ctx, mustJSON(t, map[string]any{})); err != nil {
 		t.Fatal(err)
 	}
-	cm := &Commit{WorkDir: dir}
+	cm := NewCommitTool(dir)
 	if _, err := cm.Execute(ctx, mustJSON(t, map[string]any{"message": "second"})); err != nil {
 		t.Fatal(err)
 	}

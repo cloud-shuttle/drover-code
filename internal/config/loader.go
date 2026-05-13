@@ -17,30 +17,40 @@ import (
 	"unicode/utf8"
 )
 
-// Settings is the merged configuration from all three levels.
-type Settings struct {
-	Model                      string            `json:"model,omitempty"`
-	PermissionMode             string            `json:"permissionMode,omitempty"`
-	AllowedTools               []string          `json:"allowedTools,omitempty"`
-	DeniedTools                []string          `json:"deniedTools,omitempty"`
-	MaxTokens                  int               `json:"maxTokens,omitempty"`
-	CoordinatorMode            bool              `json:"coordinatorMode,omitempty"`
-	CoordinatorRemote          bool              `json:"coordinatorRemote,omitempty"`
-	AcceptCmd                  string            `json:"acceptCmd,omitempty"`
-	Verbose                    bool              `json:"verbose,omitempty"`
-	DreamEnabled               bool              `json:"dreamEnabled,omitempty"`
-	UndercoverMode             *bool             `json:"undercoverMode,omitempty"`
-	Env                        map[string]string `json:"env,omitempty"`
-	ContextLimitEstimate       int               `json:"contextLimitEstimate,omitempty"`
-	CharsPerTokenEstimate      int               `json:"charsPerTokenEstimate,omitempty"`
-	ProjectMarkdownMaxBytes    int               `json:"projectMarkdownMaxBytes,omitempty"`
-	ProjectMarkdownMaxFiles    int               `json:"projectMarkdownMaxFiles,omitempty"`
-	ProjectMarkdownIgnoreGlobs []string          `json:"projectMarkdownIgnoreGlobs,omitempty"`
-	DisableAutoCompaction      bool              `json:"disableAutoCompaction,omitempty"`
-	DreamMaxRetentionEntries   int               `json:"dreamMaxRetentionEntries,omitempty"`
-	DreamMaxRetentionAgeDays   int               `json:"dreamMaxRetentionAgeDays,omitempty"`
+// CommandConfig holds JSON/YAML command definitions when not using Markdown files.
+type CommandConfig struct {
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Template    string `json:"template,omitempty" yaml:"template,omitempty"`
+	Agent       string `json:"agent,omitempty" yaml:"agent,omitempty"`
+	Model       string `json:"model,omitempty" yaml:"model,omitempty"`
+	RiskTier    int    `json:"risk_tier,omitempty" yaml:"risk_tier,omitempty"`
+	Subtask     bool   `json:"subtask,omitempty" yaml:"subtask,omitempty"`
 }
 
+// Settings is the merged configuration from all three levels.
+type Settings struct {
+	Model                      string                   `json:"model,omitempty"`
+	PermissionMode             string                   `json:"permissionMode,omitempty"`
+	AllowedTools               []string                 `json:"allowedTools,omitempty"`
+	DeniedTools                []string                 `json:"deniedTools,omitempty"`
+	MaxTokens                  int                      `json:"maxTokens,omitempty"`
+	CoordinatorMode            bool                     `json:"coordinatorMode,omitempty"`
+	CoordinatorRemote          bool                     `json:"coordinatorRemote,omitempty"`
+	AcceptCmd                  string                   `json:"acceptCmd,omitempty"`
+	Verbose                    bool                     `json:"verbose,omitempty"`
+	DreamEnabled               bool                     `json:"dreamEnabled,omitempty"`
+	UndercoverMode             *bool                    `json:"undercoverMode,omitempty"`
+	Env                        map[string]string        `json:"env,omitempty"`
+	Commands                   map[string]CommandConfig `json:"commands,omitempty"`
+	ContextLimitEstimate       int                      `json:"contextLimitEstimate,omitempty"`
+	CharsPerTokenEstimate      int                      `json:"charsPerTokenEstimate,omitempty"`
+	ProjectMarkdownMaxBytes    int                      `json:"projectMarkdownMaxBytes,omitempty"`
+	ProjectMarkdownMaxFiles    int                      `json:"projectMarkdownMaxFiles,omitempty"`
+	ProjectMarkdownIgnoreGlobs []string                 `json:"projectMarkdownIgnoreGlobs,omitempty"`
+	DisableAutoCompaction      bool                     `json:"disableAutoCompaction,omitempty"`
+	DreamMaxRetentionEntries   int                      `json:"dreamMaxRetentionEntries,omitempty"`
+	DreamMaxRetentionAgeDays   int                      `json:"dreamMaxRetentionAgeDays,omitempty"`
+}
 // Loader manages settings loading and CLAUDE.md injection.
 type Loader struct {
 	mu         sync.RWMutex
@@ -169,6 +179,12 @@ func (l *Loader) loadProjectMarkdown(merged Settings) string {
 		if c := filepath.Join(dir, "CLAUDE.md"); fileExists(c) {
 			files = append(files, c)
 		}
+		if d := filepath.Join(dir, ".drover.md"); fileExists(d) {
+			files = append(files, d)
+		}
+		if a := filepath.Join(dir, "AGENTS.md"); fileExists(a) {
+			files = append(files, a)
+		}
 		parent := filepath.Dir(dir)
 		if parent == dir || dir == home {
 			break
@@ -201,7 +217,7 @@ func (l *Loader) loadProjectMarkdown(merged Settings) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("# Project context (from CLAUDE.md)\n\n")
+	b.WriteString("# Project context (from .drover.md / AGENTS.md / CLAUDE.md)\n\n")
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
@@ -216,7 +232,7 @@ func (l *Loader) loadProjectMarkdown(merged Settings) string {
 	out := b.String()
 	if maxBytes > 0 && len(out) > maxBytes {
 		out = truncateUTF8Prefix(out, maxBytes)
-		out += "\n\n_(CLAUDE.md injection truncated: projectMarkdownMaxBytes or DROVER_CODE_MAX_PROJECT_MARKDOWN_BYTES)_\n"
+		out += "\n\n_(Project markdown injection truncated: maxBytes exceeded)_\n"
 	}
 	return out
 }
@@ -301,6 +317,12 @@ func mergeInto(dst *Settings, src Settings) {
 			dst.Env = make(map[string]string)
 		}
 		dst.Env[k] = v
+	}
+	for k, v := range src.Commands {
+		if dst.Commands == nil {
+			dst.Commands = make(map[string]CommandConfig)
+		}
+		dst.Commands[k] = v
 	}
 }
 

@@ -15,8 +15,8 @@ func TestRegisterAll_toolNamesAndCount(t *testing.T) {
 	RegisterAll(r, dir)
 
 	defs := r.Definitions()
-	if len(defs) != 16 {
-		t.Fatalf("expected 16 built-in tools, got %d", len(defs))
+	if len(defs) != 19 {
+		t.Fatalf("expected 19 built-in tools, got %d", len(defs))
 	}
 	names := make([]string, 0, len(defs))
 	for _, d := range defs {
@@ -26,6 +26,7 @@ func TestRegisterAll_toolNamesAndCount(t *testing.T) {
 
 	want := []string{
 		"bash",
+		"create_pr",
 		"edit_file",
 		"file_info",
 		"git_add",
@@ -39,8 +40,10 @@ func TestRegisterAll_toolNamesAndCount(t *testing.T) {
 		"grep",
 		"list_directory",
 		"read_file",
+		"review_my_changes",
 		"web_fetch",
 		"write_file",
+		"write_plan",
 	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("tool names mismatch\ngot:  %q\nwant: %q", names, want)

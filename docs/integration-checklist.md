@@ -65,7 +65,7 @@ A practical guide to implementing features and maintaining integration points in
    ```
 
 5. **Document**
-   - Add entry to `AVAILABLE_TOOLS.md`
+   - Add entry to `available-tools.md`
    - Update category if needed
 
 6. **Update permission presets** (if needed)
@@ -122,6 +122,37 @@ A practical guide to implementing features and maintaining integration points in
 5. **Test**
    - Unit test in `config/*_test.go`
    - Test cascade: default → env → local.json → project.json → home.json
+
+---
+
+### Adding a Custom Command
+
+**When:** Implementing repeatable agentic workflows or prompt templates.
+
+**Steps:**
+
+1. **Create Markdown Definition**
+   - Place in `.drover/commands/my-command.md` or `~/.drover/commands/`
+   ```markdown
+   ---
+   name: my-command
+   description: Does something useful
+   risk_tier: 1
+   ---
+   Run the following on: $1
+   Include context: @context.txt
+   Execute helper: !`date`
+   ```
+
+2. **Verify Expansion**
+   - Commands support positional arguments (`$1`), bulk arguments (`$ARGUMENTS`), and placeholders (`{var}`).
+   - File inclusion (`@file`) and shell execution (``!`cmd` ``) are supported.
+
+3. **Check Drover Guard Rules**
+   - If `DROVER_GUARD_URL` is set, ensure the command's `risk_tier` and action are allowed by the governing ReBAC policies in Drover Guard.
+
+4. **Document**
+   - Add to project's internal documentation or README.
 
 ---
 
@@ -516,8 +547,8 @@ kill $PID
 **When adding a feature:**
 
 - [ ] `README.md` — user-visible changes
-- [ ] `AVAILABLE_TOOLS.md` — new tools
-- [ ] `INTERACTION_GUIDELINES.md` — behavioral changes
+- [ ] `available-tools.md` — new tools
+- [ ] `interaction-guidelines.md` — behavioral changes
 - [ ] Design doc — major architecture changes
 - [ ] Code comments — non-obvious logic
 - [ ] Godoc — exported functions/types

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -529,4 +530,149 @@ func TestModel_multiTurnTwoUserSubmissions(t *testing.T) {
 	if m7.history[3].role != "assistant" || !strings.Contains(m7.history[3].content, "r2") {
 		t.Fatalf("second assistant: %+v", m7.history[3])
 	}
+}
+
+func TestModel_messageQueueingWhileBusy(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", "/w", "u", "h")
+	
+	var runs []string
+	m.runFunc = func(input string) tea.Cmd {
+		runs = append(runs, input)
+		return nil
+	}
+
+	m.textarea.SetValue("task 1")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := next.(*Model)
+	if len(runs) != 1 || runs[0] != "task 1" {
+		t.Fatalf("first run %v", runs)
+	}
+	if !m2.agentBusy {
+		t.Fatal("expected busy")
+	}
+
+	m2.textarea.SetValue("task 2")
+	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := next.(*Model)
+	
+	if len(runs) != 1 {
+		t.Fatalf("second run happened too early: %v", runs)
+	}
+	if len(m3.messageQueue) != 1 || m3.messageQueue[0] != "task 2" {
+		t.Fatalf("expected queue to have 'task 2', got %v", m3.messageQueue)
+	}
+	
+	next, _ = m3.Update(agentRunCompleteMsg{err: nil})
+	m4 := next.(*Model)
+	
+	if len(runs) != 2 || runs[1] != "task 2" {
+		t.Fatalf("expected runFunc to be called with 'task 2', got runs: %v", runs)
+	}
+	if len(m4.messageQueue) != 0 {
+		t.Fatalf("expected queue to be empty, got %v", m4.messageQueue)
+	}
+	if !m4.agentBusy {
+		t.Fatal("expected busy again since 'task 2' is running")
+	}
+}
+
+func TestModel_InputHistory(t *testing.T) {
+	evCh := make(chan agent.Event, 10)
+	m := New(evCh, "test-model", "/tmp/wd", "user", "host")
+
+	// Submit first message
+	m.textarea.SetValue("message 1")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Submit second message
+	m.textarea.SetValue("message 2")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Type a partial message
+	m.textarea.SetValue("partial")
+
+	// Press Up
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.textarea.Value() != "message 2" {
+		t.Fatalf("expected message 2, got %q", m.textarea.Value())
+	}
+
+	// Press Up again
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.textarea.Value() != "message 1" {
+		t.Fatalf("expected message 1, got %q", m.textarea.Value())
+	}
+
+	// Press Down
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.textarea.Value() != "message 2" {
+		t.Fatalf("expected message 2, got %q", m.textarea.Value())
+	}
+
+	// Press Down to restore saved input
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.textarea.Value() != "partial" {
+		t.Fatalf("expected partial, got %q", m.textarea.Value())
+	}
+}
+
+func TestModel_GuardRejection(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", "/w", "u", "h")
+	m.width = 100
+	m.height = 50
+
+	guardErr := fmt.Errorf("🚨 Command Blocked by Governance Policy: risk too high")
+	next, _ := m.Update(agentRunCompleteMsg{err: guardErr})
+	m2 := next.(*Model)
+
+	if m2.lastError != guardErr.Error() {
+		t.Errorf("expected lastError to be %q, got %q", guardErr.Error(), m2.lastError)
+	}
+
+	view := m2.View()
+	if !strings.Contains(view, "error: 🚨 Command Blocked by Governance Policy: risk too high") {
+		t.Errorf("expected view to contain error message, got:\n%s", view)
+	}
+}
+
+func TestModel_StressTest500Turns(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "test-user", "/test-dir", "test-host", "test-model")
+	m.width = 100
+	m.height = 40
+	m.runFunc = func(input string) tea.Cmd {
+		return nil
+	}
+
+	var currentModel tea.Model = m
+
+	for i := 0; i < 500; i++ {
+		// 1. Simulate User input
+		inputStr := fmt.Sprintf("User Turn %d", i)
+		mod := currentModel.(*Model)
+		mod.textarea.SetValue(inputStr)
+		currentModel, _ = mod.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		// 2. Simulate Agent starting
+		currentModel, _ = currentModel.Update(agentMsg{event: agent.TextDeltaEvent{Text: fmt.Sprintf("Agent Turn %d", i)}})
+
+		// 3. Simulate Agent finishing
+		currentModel, _ = currentModel.Update(agentMsg{event: agent.DoneEvent{}})
+		currentModel, _ = currentModel.Update(agentRunCompleteMsg{err: nil})
+		
+		// 4. Periodically call View to ensure no panics during layout rendering under heavy load
+		if i%50 == 0 {
+			_ = currentModel.(*Model).View()
+		}
+	}
+
+	finalModel := currentModel.(*Model)
+	if len(finalModel.history) < 1000 { // 500 user messages + 500 agent messages
+		t.Fatalf("expected at least 1000 messages in history, got %d", len(finalModel.history))
+	}
+
+	// Just a sanity check that it successfully runs without panicking.
+	_ = finalModel.View()
 }

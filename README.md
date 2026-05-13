@@ -1,6 +1,44 @@
-# drover-code
+# Drover Code
+
+> Part of the [Drover Ecosystem](../DROVER_ECOSYSTEM.md) — Orchestrating Autonomous Agentic Engineering
 
 A single static Go binary that runs an agentic coding assistant against the Anthropic Messages API (streaming, tools, Bubble Tea TUI). No Node or Bun.
+
+## Documentation Index
+
+**Core Operational Guides:**
+- [Agents & Personas](AGENTS.md)
+- [Available Tools](docs/available-tools.md)
+- [Interaction Guidelines](docs/interaction-guidelines.md)
+- [Integration Checklist](docs/integration-checklist.md)
+
+**Architecture & Implementation:**
+- [Architecture Overview](docs/architecture-overview.md)
+- [Implementation Requirements](docs/implementation-requirements.md)
+- [Requirements Index](docs/requirements-index.md)
+- [Unikraft Cloud Architecture](docs/unikraft-cloud-architecture.md)
+- [Anthropic Compatible Providers](docs/anthropic-compatible-providers.md)
+
+**Design Specifications (`design/`):**
+- [01 Foundation](design/01-foundation.md)
+- [02 Agent Loop](design/02-agent-loop.md)
+- [03 Tools Overview](design/03-tools-overview.md)
+- [04 FS Tools](design/04-fs-tools.md)
+- [05 Shell Search Tools](design/05-shell-search-tools.md)
+- [06 Git Web Tools](design/06-git-web-tools.md)
+- [07 TUI](design/07-tui.md)
+- [08 Config & Permissions](design/08-config-permissions-undercover.md)
+- [09 Advanced Systems](design/09-advanced-systems.md)
+- [10 Integrations](design/10-integrations.md)
+- [11 Headless Orchestration](design/11-headless-orchestration.md)
+- [12 Property Fuzz Testing](design/12-property-fuzz-testing.md)
+- [13 Test Coverage Plan](design/13-test-coverage-plan.md)
+- [14 UX Memory Improvements](design/14-ux-memory-improvements.md)
+- [15 UKC Tools](design/15-ukc-tools.md)
+- [16 UKC Workspace Sync](design/16-ukc-workspace-sync.md)
+- [17 Custom Commands](design/17-custom-commands.md)
+- [Claude Go Design Spec](design/claude-go-design-spec.md)
+- [Claude Go Test Spec](design/claude-go-test-spec.md)
 
 ## Requirements
 
@@ -114,6 +152,28 @@ Env overrides win over JSON settings for those two values.
 | Coordinator | `CLAUDE_CODE_COORDINATOR_MODE=1` or `"coordinatorMode": true` in settings |
 | IDE bridge (JSON-RPC over stdio) | `CLAUDE_CODE_IDE_BRIDGE=1` |
 | GitHub webhook server | `./drover-code webhook` (needs `GITHUB_TOKEN`; optional `GITHUB_WEBHOOK_SECRET`, `WEBHOOK_ADDR`, `WEBHOOK_WORK_DIR`) |
+
+## Custom Commands
+
+You can define repeatable agent workflows using Markdown or JSON files.
+Place Markdown definitions in `.drover/commands/*.md` (project-level) or `~/.drover/commands/*.md` (global).
+
+Example `.drover/commands/audit.md`:
+```markdown
+---
+name: audit
+description: Run a security audit
+agent: security
+risk_tier: 2
+---
+Audit the following file: $1
+Using rules in: @rules.md
+```
+
+Then invoke it via the TUI or Headless mode:
+```bash
+echo "/audit main.go" | ./drover-code
+```
 
 ## TUI slash commands
 

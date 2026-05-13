@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/api"
+	"github.com/cloudshuttle/drover-code/internal/commands"
 	"github.com/cloudshuttle/drover-code/internal/config"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
@@ -34,6 +35,7 @@ func NewProgram(
 	modelName string,
 	settings config.Settings,
 	workDir string,
+	cmdExec *commands.Executor,
 ) *Program {
 	eventCh := make(chan agent.Event, 512)
 	ctx, cancel := context.WithCancel(baseCtx)
@@ -74,9 +76,77 @@ func NewProgram(
 		cancel:  cancel,
 	}
 
+	if cmdExec != nil {
+		cmds := cmdExec.GetRegistry().List()
+		var names, descs []string
+		for _, c := range cmds {
+			names = append(names, c.Name)
+			descs = append(descs, c.Description)
+		}
+		model.RegisterCustomCommands(names, descs)
+	}
+
 	model.SetRunFunc(func(input string) tea.Cmd {
+		runCtx, runCancel := context.WithCancel(ctx)
+		model.SetRunCancel(runCancel)
+
 		return runAgent(func() error {
-			return loop.Run(ctx, input)
+			defer runCancel()
+			if cmdExec != nil && strings.HasPrefix(strings.TrimSpace(input), "/") {
+				parts := strings.Fields(strings.TrimSpace(input))
+				cmdName := strings.TrimPrefix(parts[0], "/")
+
+				if cmdName == "commands" {
+					if len(parts) > 1 && parts[1] == "init" {
+						wd, _ := os.Getwd()
+						if err := commands.Init(wd); err != nil {
+							convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: fmt.Sprintf("Error initializing commands: %v", err)}}))
+						} else {
+							convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: "✅ Successfully initialized starter commands in .drover/commands/\nRun `/commands list` to see them."}}))
+						}
+						return nil
+					}
+					
+					// default to list
+					cmds := cmdExec.GetRegistry().List()
+					var b strings.Builder
+					if len(cmds) == 0 {
+						b.WriteString("No custom commands loaded.\nRun `/commands init` to create starter commands.")
+					} else {
+						b.WriteString("Available Custom Commands\n=========================\n\n")
+						for _, c := range cmds {
+							extra := []string{}
+							if c.Agent != "" && c.Agent != "default" {
+								extra = append(extra, "agent:"+c.Agent)
+							}
+							if c.RiskTier > 0 {
+								extra = append(extra, fmt.Sprintf("risk:%d", c.RiskTier))
+							}
+							extraStr := ""
+							if len(extra) > 0 {
+								extraStr = "  [" + strings.Join(extra, ", ") + "]"
+							}
+							fmt.Fprintf(&b, "- `/%s` - %s%s\n", c.Name, c.Description, extraStr)
+						}
+						b.WriteString("\nTip: Run `/commands init` to add more starter commands.")
+					}
+					convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: b.String()}}))
+					return nil
+				}
+
+				if expanded, cmdDef, err := cmdExec.EvaluateAndExpand(runCtx, cmdName, parts[1:]); err == nil {
+					input = expanded
+					if cmdDef.Model != "" {
+						loop.SetClient(api.NewClient(os.Getenv("ANTHROPIC_API_KEY"), cmdDef.Model))
+					}
+				} else if !strings.Contains(err.Error(), "not found") {
+					if strings.Contains(err.Error(), "Drover Guard") {
+						return fmt.Errorf("🚨 Command Blocked by Governance Policy: %v", err)
+					}
+					return fmt.Errorf("command error: %v", err)
+				}
+			}
+			return loop.Run(runCtx, input)
 		})
 	})
 	model.SetCompactFn(func() error {
@@ -86,7 +156,6 @@ func NewProgram(
 	p.tea = tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 	)
 
 	return p
