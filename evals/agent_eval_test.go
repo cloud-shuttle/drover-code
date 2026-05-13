@@ -14,6 +14,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -378,6 +380,64 @@ func main() {
 				ToolsCalled:    []string{"glob"},
 				MaxToolCalls:   3,
 				MaxTurns:       8,
+			},
+		},
+
+		{
+			Name:  "git-fix-bug",
+			Input: "There is a bug in calc.go where Add(a, b) multiplies instead of adds. Fix it, run tests to verify, and commit the changes with message 'Fix Add function'.",
+			Setup: func(t *testing.T) (string, func()) {
+				dir := t.TempDir()
+
+				// Initialize git repo
+				cmdInit := exec.Command("git", "init")
+				cmdInit.Dir = dir
+				_ = cmdInit.Run()
+				
+				// Configure local git user to avoid commit errors
+				cmdCfg1 := exec.Command("git", "config", "user.email", "eval@example.com")
+				cmdCfg1.Dir = dir
+				_ = cmdCfg1.Run()
+				cmdCfg2 := exec.Command("git", "config", "user.name", "Eval Bot")
+				cmdCfg2.Dir = dir
+				_ = cmdCfg2.Run()
+
+				_ = os.WriteFile(filepath.Join(dir, "calc.go"), []byte(`package calc
+func Add(a, b int) int {
+	return a * b
+}
+`), 0o644)
+
+				_ = os.WriteFile(filepath.Join(dir, "calc_test.go"), []byte(`package calc
+import "testing"
+func TestAdd(t *testing.T) {
+	if got := Add(2, 3); got != 5 {
+		t.Errorf("Add(2, 3) = %d, want 5", got)
+	}
+}
+`), 0o644)
+
+				cmdAdd := exec.Command("git", "add", ".")
+				cmdAdd.Dir = dir
+				_ = cmdAdd.Run()
+
+				cmdCommit := exec.Command("git", "commit", "-m", "Initial commit")
+				cmdCommit.Dir = dir
+				_ = cmdCommit.Run()
+
+				return dir, func() {}
+			},
+			Expect: Expectations{
+				ToolsCalled:  []string{"bash", "edit_file", "git_commit"},
+				MaxToolCalls: 8,
+				MaxTurns:     15,
+				CustomScore: func(output string) float64 {
+					lower := strings.ToLower(output)
+					if strings.Contains(lower, "fix") || strings.Contains(lower, "commit") || strings.Contains(lower, "pass") {
+						return 1.0
+					}
+					return 0.5
+				},
 			},
 		},
 	}

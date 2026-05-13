@@ -105,6 +105,7 @@ const (
 	Allow Decision = iota
 	AlwaysAllow
 	Deny
+	AppliedManually
 )
 
 // PermissionFunc is called by the agent loop before executing any tool

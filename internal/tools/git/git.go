@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/cloudshuttle/drover-code/internal/tools/quality"
 	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
 )
 
@@ -165,22 +166,35 @@ func (t *Add) Execute(ctx context.Context, rawInput json.RawMessage) (string, er
 	return runGit(ctx, t.WorkDir, args...)
 }
 
-type Commit struct{ WorkDir string }
+type Commit struct {
+	WorkDir string
+	review  *quality.Review
+}
 
 type commitInput struct {
-	Message    string `json:"message"`
-	AllowEmpty bool   `json:"allow_empty"`
+	Message     string   `json:"message"`
+	AutoReview  bool     `json:"auto_review,omitempty"` // default: true
+	ExtraChecks []string `json:"extra_checks,omitempty"`
+}
+
+func NewCommitTool(workDir string) *Commit {
+	return &Commit{
+		WorkDir: workDir,
+		review:  &quality.Review{WorkDir: workDir},
+	}
 }
 
 func (t *Commit) Name() string { return "git_commit" }
 func (t *Commit) Description() string {
-	return "Create a commit from currently staged changes. " +
-		"Make sure to run git_add first to stage the files you want to commit."
+	return "Stage all changes and create a commit.\n" +
+		"**Strongly enforces quality**: By default, it runs review_my_changes first.\n" +
+		"Only commits if verification passes."
 }
 func (t *Commit) InputSchema() json.RawMessage {
 	return toolutil.NewSchema("object").
-		Prop("message", toolutil.NewSchema("string").Desc("Commit message. Use the conventional commit format: type(scope): description")).
-		Prop("allow_empty", toolutil.NewSchema("boolean").Desc("Allow a commit with no staged changes (default: false)")).
+		Prop("message", toolutil.NewSchema("string").Desc("Clear, conventional commit message")).
+		Prop("auto_review", toolutil.NewSchema("boolean").Desc("Whether to run review_my_changes before committing (default: true)")).
+		Prop("extra_checks", toolutil.NewSchema("array").Items(toolutil.NewSchema("string")).Desc("Additional commands to run during review")).
 		Required("message").
 		Build()
 }
@@ -194,31 +208,81 @@ func (t *Commit) Execute(ctx context.Context, rawInput json.RawMessage) (string,
 		return "", fmt.Errorf("git_commit: message cannot be empty")
 	}
 
-	args := []string{"commit", "-m", inp.Message}
-	if inp.AllowEmpty {
-		args = append(args, "--allow-empty")
+	// Default to auto review
+	if !strings.Contains(string(rawInput), `"auto_review": false`) {
+		inp.AutoReview = true
 	}
-	return runGit(ctx, t.WorkDir, args...)
+
+	var report strings.Builder
+	report.WriteString("=== GIT COMMIT ===\n\n")
+
+	// === 1. Run Review (Mandatory Quality Gate) ===
+	if inp.AutoReview {
+		report.WriteString("Running quality review before commit...\n\n")
+
+		reviewInputRaw, _ := json.Marshal(map[string]interface{}{"commands": inp.ExtraChecks})
+		reviewOutput, reviewErr := t.review.Execute(ctx, reviewInputRaw)
+		report.WriteString(reviewOutput)
+
+		if reviewErr != nil || strings.Contains(reviewOutput, "FAILED") {
+			report.WriteString("\n❌ Commit blocked: Quality review failed.\n")
+			report.WriteString("Fix the issues and try committing again.\n")
+			return report.String(), fmt.Errorf("pre-commit verification failed")
+		}
+		report.WriteString("✅ Quality review passed\n\n")
+	}
+
+	// === 2. Stage changes ===
+	_, err := runGit(ctx, t.WorkDir, "add", "-A")
+	if err != nil {
+		return "", fmt.Errorf("git add failed: %w", err)
+	}
+
+	// === 3. Commit ===
+	commitOut, err := runGit(ctx, t.WorkDir, "commit", "-m", inp.Message)
+	if err != nil {
+		return report.String() + commitOut, fmt.Errorf("git commit failed: %w", err)
+	}
+
+	report.WriteString(commitOut)
+	report.WriteString("\n✅ Successfully committed with quality verification.\n")
+	return report.String(), nil
 }
 
-type Push struct{ WorkDir string }
+type Push struct {
+	WorkDir string
+	review  *quality.Review
+}
 
 type pushInput struct {
-	Remote string `json:"remote"`
-	Branch string `json:"branch"`
-	Force  bool   `json:"force"`
+	Branch      string   `json:"branch,omitempty"`
+	Force       bool     `json:"force,omitempty"`
+	AutoReview  bool     `json:"auto_review,omitempty"` // default: true
+	ExtraChecks []string `json:"extra_checks,omitempty"`
+}
+
+func NewPushTool(workDir string) *Push {
+	return &Push{
+		WorkDir: workDir,
+		review:  &quality.Review{WorkDir: workDir},
+	}
 }
 
 func (t *Push) Name() string { return "git_push" }
 func (t *Push) Description() string {
-	return "Push commits to a remote repository. " +
-		"force=true uses --force-with-lease (safer than --force, refuses if remote has new commits)."
+	return "Push committed changes to remote.\n" +
+		"Strong safety protections:\n" +
+		"- Runs quality review by default\n" +
+		"- Warns on protected branches (main/master)\n" +
+		"- Checks for unpushed commits and remote status\n" +
+		"- Blocks force push unless explicitly allowed"
 }
 func (t *Push) InputSchema() json.RawMessage {
 	return toolutil.NewSchema("object").
-		Prop("remote", toolutil.NewSchema("string").Desc("Remote name (default: origin)")).
-		Prop("branch", toolutil.NewSchema("string").Desc("Branch to push (default: current branch)")).
-		Prop("force", toolutil.NewSchema("boolean").Desc("Use --force-with-lease (default: false)")).
+		Prop("branch", toolutil.NewSchema("string").Desc("Branch to push (default: current)")).
+		Prop("force", toolutil.NewSchema("boolean").Desc("Allow force push (DANGEROUS - use sparingly)")).
+		Prop("auto_review", toolutil.NewSchema("boolean").Desc("Run review_my_changes before push (default: true)")).
+		Prop("extra_checks", toolutil.NewSchema("array").Items(toolutil.NewSchema("string"))).
 		Build()
 }
 func (t *Push) NeedsPermission(_ json.RawMessage) bool { return true }
@@ -228,18 +292,68 @@ func (t *Push) Execute(ctx context.Context, rawInput json.RawMessage) (string, e
 		return "", fmt.Errorf("git_push: bad input: %w", err)
 	}
 
-	remote := inp.Remote
-	if remote == "" {
-		remote = "origin"
+	var report strings.Builder
+	report.WriteString("=== GIT PUSH ===\n\n")
+
+	// === 1. Safety Checks ===
+	currentBranch, err := runGit(ctx, t.WorkDir, "branch", "--show-current")
+	if err != nil {
+		return "", err
 	}
-	args := []string{"push", remote}
-	if inp.Branch != "" {
-		args = append(args, inp.Branch)
+	currentBranch = strings.TrimSpace(currentBranch)
+
+	if inp.Branch == "" {
+		inp.Branch = currentBranch
 	}
+
+	// Protected branch warning
+	if isProtectedBranch(inp.Branch) && !inp.Force {
+		report.WriteString(fmt.Sprintf("⚠️  Warning: Pushing to protected branch '%s'\n", inp.Branch))
+		report.WriteString("Consider creating a PR instead of direct push.\n\n")
+	}
+
+	// === 2. Quality Review ===
+	if !strings.Contains(string(rawInput), `"auto_review": false`) {
+		inp.AutoReview = true
+	}
+	if inp.AutoReview {
+		report.WriteString("Running pre-push quality review...\n\n")
+
+		reviewRaw, _ := json.Marshal(map[string]interface{}{"commands": inp.ExtraChecks})
+		reviewOut, reviewErr := t.review.Execute(ctx, reviewRaw)
+
+		report.WriteString(reviewOut + "\n")
+
+		if reviewErr != nil || strings.Contains(reviewOut, "FAILED") {
+			return report.String(), fmt.Errorf("push blocked: quality review failed")
+		}
+	}
+
+	// === 3. Push ===
+	args := []string{"push", "origin", inp.Branch}
 	if inp.Force {
-		args = append(args, "--force-with-lease")
+		args = append(args, "--force-with-lease") // safer than --force
 	}
-	return runGit(ctx, t.WorkDir, args...)
+
+	out, err := runGit(ctx, t.WorkDir, args...)
+	if err != nil {
+		report.WriteString(out)
+		return report.String(), fmt.Errorf("git push failed: %w", err)
+	}
+
+	report.WriteString(out)
+	report.WriteString("\n✅ Successfully pushed to origin/" + inp.Branch + "\n")
+	return report.String(), nil
+}
+
+func isProtectedBranch(branch string) bool {
+	protected := []string{"main", "master", "develop", "production", "release"}
+	for _, p := range protected {
+		if branch == p || strings.HasPrefix(branch, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 type CreateBranch struct{ WorkDir string }

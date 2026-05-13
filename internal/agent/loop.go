@@ -104,6 +104,11 @@ func (l *Loop) SetAutoCompaction(enabled bool) {
 	l.autoCompaction = enabled
 }
 
+// SetClient overrides the API client for this loop.
+func (l *Loop) SetClient(c *api.Client) {
+	l.client = c
+}
+
 // ApplyWorkflowSettings applies optional loop behavior from merged settings.
 func (l *Loop) ApplyWorkflowSettings(disableAutoCompaction bool) {
 	if disableAutoCompaction {
@@ -681,6 +686,20 @@ func (l *Loop) executeSingleTool(ctx context.Context, idx int, call api.ToolUseB
 				IsError:   true,
 			}, nil
 		}
+		if preDecisions[idx] == tools.AppliedManually {
+			l.emit(ToolDoneEvent{
+				CallIndex:     idx,
+				ID:            call.ID,
+				Name:          call.Name,
+				IsError:       false,
+				OutputSummary: "applied interactively",
+			})
+			return api.ToolResultBlock{
+				ToolUseID: call.ID,
+				Content:   "Changes applied interactively by the user via Interactive Diff.",
+				IsError:   false,
+			}, nil
+		}
 		// Allow path: skip per-tool prompting.
 		goto exec
 	}
@@ -701,6 +720,20 @@ func (l *Loop) executeSingleTool(ctx context.Context, idx int, call api.ToolUseB
 				ToolUseID: call.ID,
 				Content:   "Tool execution denied by user.",
 				IsError:   true,
+			}, nil
+		}
+		if decision == tools.AppliedManually {
+			l.emit(ToolDoneEvent{
+				CallIndex:     idx,
+				ID:            call.ID,
+				Name:          call.Name,
+				IsError:       false,
+				OutputSummary: "applied interactively",
+			})
+			return api.ToolResultBlock{
+				ToolUseID: call.ID,
+				Content:   "Changes applied interactively by the user via Interactive Diff.",
+				IsError:   false,
 			}, nil
 		}
 	}

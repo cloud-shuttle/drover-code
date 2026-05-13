@@ -168,3 +168,67 @@ func TestOpenStore_skipsImportWhenEnvSet(t *testing.T) {
 	}
 	_ = s
 }
+
+func TestSQLiteStore_CloseAndErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "close.db")
+	s, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	
+	// Close the store
+	sq := s.(*sqliteStore)
+	if err := sq.Close(); err != nil {
+		t.Fatal(err)
+	}
+	
+	// Double close should be fine
+	if err := sq.Close(); err != nil {
+		t.Fatal(err)
+	}
+	
+	// Operations on closed DB should fail
+	if err := sq.Save(Entry{ID: "x"}); err == nil {
+		t.Fatal("expected save error on closed db")
+	}
+	if _, err := sq.Recent(1); err == nil {
+		t.Fatal("expected recent error on closed db")
+	}
+	if _, err := sq.All(); err == nil {
+		t.Fatal("expected all error on closed db")
+	}
+	if err := sq.Prune(Retention{MaxAgeDays: 1}); err == nil {
+		t.Fatal("expected prune error on closed db")
+	}
+	
+	// Test invalid path for NewSQLiteStore
+	_, err = NewSQLiteStore("/dev/null/invalid/mem.db")
+	if err == nil {
+		t.Fatal("expected mkdir error for invalid path")
+	}
+}
+
+func TestScanEntries_InvalidTime(t *testing.T) {
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "invalid_time.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sq := s.(*sqliteStore)
+	// manually insert bad time
+	_, err = sq.db.Exec(`INSERT INTO dream_entries (id, ts, tags_json, content, session_id) VALUES ('1', 'not-a-time', '[]', 'c', 's')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	
+	all, err := sq.All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(all))
+	}
+	// Time should be zero value if parsing failed completely
+	if !all[0].Timestamp.IsZero() {
+		t.Fatalf("expected zero time, got %v", all[0].Timestamp)
+	}
+}

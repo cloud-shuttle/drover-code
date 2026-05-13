@@ -8,6 +8,14 @@ import (
 )
 
 func (m *Model) View() string {
+	if m.showingSearch && m.searchModel != nil {
+		return m.searchModel.View()
+	}
+	
+	if m.showingDiff && m.diffModel != nil {
+		return m.diffModel.View()
+	}
+
 	if m.width == 0 {
 		return "loading…"
 	}
@@ -173,6 +181,12 @@ func (m *Model) viewInput() string {
 	}
 
 	input := border.Width(m.width - 2).Render(m.textarea.View())
+
+	if len(m.messageQueue) > 0 {
+		queuedText := fmt.Sprintf("⏳ %d message(s) queued...", len(m.messageQueue))
+		queuedBanner := lipgloss.NewStyle().Foreground(lipgloss.Color("204")).MarginLeft(2).Render(queuedText)
+		input = lipgloss.JoinVertical(lipgloss.Left, queuedBanner, input)
+	}
 
 	if m.showAuto {
 		auto := m.viewAutoComplete()

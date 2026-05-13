@@ -71,3 +71,45 @@ func TestBash_EmptyCommand(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestBash_LargeOutputTruncation(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+	b := Bash{WorkDir: t.TempDir()}
+	// Generate 100,000 characters of 'a'
+	raw, _ := json.Marshal(map[string]any{
+		"command": `printf 'a%.0s' {1..100000}`,
+	})
+	out, err := b.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The internal toolutil.Truncate caps at 200k.
+	if len(out) > 210000 {
+		t.Fatalf("expected truncated output, got length %d", len(out))
+	}
+	if !strings.Contains(out, "exit_code: 0") {
+		t.Fatal("expected exit code 0")
+	}
+}
+
+func TestBash_NonZeroExit(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+	b := Bash{WorkDir: t.TempDir()}
+	raw, _ := json.Marshal(map[string]any{
+		"command": `echo "failing"; exit 42`,
+	})
+	out, err := b.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "failing") {
+		t.Fatalf("expected stdout 'failing', got: %s", out)
+	}
+	if !strings.Contains(out, "exit_code: 42") {
+		t.Fatalf("expected exit_code 42, got: %s", out)
+	}
+}

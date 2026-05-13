@@ -1,0 +1,4 @@
+spec: v0.6
+rootfs: ./Dockerfile
+runtime: base-compat:latest
+cmd: ["/usr/local/bin/ukc-agent"]

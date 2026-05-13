@@ -71,6 +71,44 @@ func TestParseWebhook_UnsupportedEventType(t *testing.T) {
 	}
 }
 
+func TestParseWebhook_PullRequestIgnoredWithoutTrigger(t *testing.T) {
+	payload := map[string]any{
+		"action": "opened",
+		"pull_request": map[string]any{
+			"number": float64(10),
+			"title":  "Test PR",
+		},
+		"repository": map[string]any{
+			"full_name": "o/r",
+		},
+	}
+	raw, _ := json.Marshal(payload)
+	parsed, err := ParseWebhook(EventPullRequest, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Trigger != nil {
+		t.Fatalf("expected pull_request to produce no trigger, got %v", parsed.Trigger)
+	}
+}
+
+func TestParseWebhook_PushIgnoredWithoutTrigger(t *testing.T) {
+	payload := map[string]any{
+		"ref": "refs/heads/main",
+		"repository": map[string]any{
+			"full_name": "o/r",
+		},
+	}
+	raw, _ := json.Marshal(payload)
+	parsed, err := ParseWebhook(EventType("push"), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Trigger != nil {
+		t.Fatalf("expected push to produce no trigger, got %v", parsed.Trigger)
+	}
+}
+
 func TestParseWebhook_IssueComment_Mention(t *testing.T) {
 	payload := map[string]any{
 		"action": "created",

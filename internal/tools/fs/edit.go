@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
+	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 // EditFile makes a targeted string-replacement in a file.
@@ -18,17 +19,17 @@ type EditFile struct {
 
 type editFileInput struct {
 	Path      string `json:"path"`
-	OldString string `json:"old_string"`
-	NewString string `json:"new_string"`
+	OldString string `json:"old_string,omitempty"`
+	NewString string `json:"new_string,omitempty"`
+	Diff      string `json:"diff,omitempty"`
 }
 
 func (t *EditFile) Name() string { return "edit_file" }
 func (t *EditFile) Description() string {
-	return "Make a targeted replacement in a file: replace old_string with new_string. " +
-		"old_string must match exactly one location in the file (use enough context to be unique). " +
-		"The tool uses fuzzy whitespace normalisation when searching, so minor indentation " +
-		"differences between your old_string and the file are handled automatically. " +
-		"Returns a unified diff of the change."
+	return "Make a targeted replacement in a file. Supports two modes:\n" +
+		"1. String replacement: replace old_string with new_string. The tool uses fuzzy whitespace normalisation when searching.\n" +
+		"2. Unified diff patch: provide a unified diff in the 'diff' field.\n" +
+		"Returns a unified diff of the actual change made."
 }
 
 func (t *EditFile) InputSchema() json.RawMessage {
@@ -36,7 +37,8 @@ func (t *EditFile) InputSchema() json.RawMessage {
 		Prop("path", toolutil.NewSchema("string").Desc("File to edit, relative to working directory or absolute")).
 		Prop("old_string", toolutil.NewSchema("string").Desc("The exact text to find and replace. Must be unique in the file. Include surrounding lines for context if needed")).
 		Prop("new_string", toolutil.NewSchema("string").Desc("The replacement text. Use an empty string to delete old_string")).
-		Required("path", "old_string", "new_string").
+		Prop("diff", toolutil.NewSchema("string").Desc("Unified diff patch to apply. If provided, old_string and new_string are ignored.")).
+		Required("path").
 		Build()
 }
 
@@ -46,9 +48,6 @@ func (t *EditFile) Execute(_ context.Context, rawInput json.RawMessage) (string,
 	var inp editFileInput
 	if err := json.Unmarshal(rawInput, &inp); err != nil {
 		return "", fmt.Errorf("edit_file: bad input: %w", err)
-	}
-	if inp.OldString == "" {
-		return "", fmt.Errorf("edit_file: old_string cannot be empty — use write_file to create new files")
 	}
 
 	absPath, err := toolutil.SafePath(t.WorkDir, inp.Path)
@@ -61,6 +60,26 @@ func (t *EditFile) Execute(_ context.Context, rawInput json.RawMessage) (string,
 		return "", fmt.Errorf("edit_file: %w", err)
 	}
 	original := string(data)
+
+	// --- mode: diff patch ---
+	if inp.Diff != "" {
+		updated, err := applyUnifiedDiff(original, inp.Diff)
+		if err != nil {
+			return "", fmt.Errorf("edit_file apply diff: %w", err)
+		}
+		if original == updated {
+			return "No changes made (patch did not apply cleanly)", nil
+		}
+		return t.applyAndDiff(absPath, inp.Path, original, updated)
+	}
+
+	// --- mode: string replacement ---
+	if inp.OldString == "" && inp.NewString == "" {
+		return "", fmt.Errorf("edit_file: either (old_string + new_string) or diff must be provided")
+	}
+	if inp.OldString == "" {
+		return "", fmt.Errorf("edit_file: old_string cannot be empty — use write_file to create new files")
+	}
 
 	// --- exact match first (fast path) ---
 	count := strings.Count(original, inp.OldString)
@@ -90,6 +109,66 @@ func (t *EditFile) Execute(_ context.Context, rawInput json.RawMessage) (string,
 	}
 
 	return t.applyAndDiff(absPath, inp.Path, original, updated)
+}
+
+// PreviewEdit simulates the edit and returns the file path and unified diff without writing.
+func PreviewEdit(workDir string, rawInput json.RawMessage) (string, string, error) {
+	var inp editFileInput
+	if err := json.Unmarshal(rawInput, &inp); err != nil {
+		return "", "", fmt.Errorf("edit_file: bad input: %w", err)
+	}
+
+	absPath, err := toolutil.SafePath(workDir, inp.Path)
+	if err != nil {
+		return "", "", fmt.Errorf("edit_file: %w", err)
+	}
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return "", "", fmt.Errorf("edit_file: %w", err)
+	}
+	original := string(data)
+
+	// --- mode: diff patch ---
+	if inp.Diff != "" {
+		updated, err := applyUnifiedDiff(original, inp.Diff)
+		if err != nil {
+			return "", "", fmt.Errorf("edit_file apply diff: %w", err)
+		}
+		if original == updated {
+			return inp.Path, "No changes made (patch did not apply cleanly)", nil
+		}
+		return inp.Path, unifiedDiff(inp.Path, original, updated), nil
+	}
+
+	// --- mode: string replacement ---
+	if inp.OldString == "" && inp.NewString == "" {
+		return "", "", fmt.Errorf("edit_file: either (old_string + new_string) or diff must be provided")
+	}
+
+	count := strings.Count(original, inp.OldString)
+	if count == 1 {
+		updated := strings.Replace(original, inp.OldString, inp.NewString, 1)
+		return inp.Path, unifiedDiff(inp.Path, original, updated), nil
+	}
+	
+	normFile := normaliseWS(original)
+	normOld := normaliseWS(inp.OldString)
+
+	fuzzyCount := strings.Count(normFile, normOld)
+	if fuzzyCount == 0 {
+		return "", "", fmt.Errorf("edit_file: old_string not found in %s", inp.Path)
+	}
+	if fuzzyCount > 1 {
+		return "", "", fmt.Errorf("edit_file: old_string matches %d locations", fuzzyCount)
+	}
+
+	updated, ok := fuzzyReplace(original, inp.OldString, inp.NewString)
+	if !ok {
+		return "", "", fmt.Errorf("edit_file: fuzzy replacement failed")
+	}
+
+	return inp.Path, unifiedDiff(inp.Path, original, updated), nil
 }
 
 func (t *EditFile) applyAndDiff(absPath, displayPath, original, updated string) (string, error) {
@@ -227,5 +306,16 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func applyUnifiedDiff(original, diff string) (string, error) {
+	dmp := diffmatchpatch.New()
+	patches, err := dmp.PatchFromText(diff)
+	if err != nil {
+		// Fallback to simplistic approach if parsing unified diff strictly fails
+		patches = dmp.PatchMake(original, diff)
+	}
+	patched, _ := dmp.PatchApply(patches, original)
+	return patched, nil
 }
 

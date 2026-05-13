@@ -1,14 +1,19 @@
-# drover-code — agent / contributor notes
+# Agent Context for Drover Code
+
+Welcome, AI Agent. This file is intended to help AI coding assistants understand the structure, context, and conventions of the `drover-code` repository.
+
+## Ecosystem Role
+
+> **Part of the Drover Ecosystem**: `drover-code` serves as the **Core Agent Engine**. It is the fast, static Go binary that actually runs the agentic loop, calls the Anthropic API (via `drover-gateway`), and executes tools. It is orchestrated by `drover` and runs headlessly inside `drover-cloud` unikernels.
 
 ## What this repo is
-
-Single static Go binary: Anthropic Messages API client with streaming, tools, Bubble Tea TUI, headless mode, IDE JSON-RPC bridge, optional coordinator mode, and GitHub webhook runner. Module path: `github.com/cloudshuttle/drover-code`.
 
 ## Layout
 
 | Path | Role |
 |------|------|
 | `cmd/drover-code` | CLI entry: TUI, headless, `webhook`, flags |
+| `cmd/ukc-agent` | HTTP agent for Unikraft Cloud instances (workspace sync & exec) |
 | `internal/agent` | Agent loop, events |
 | `internal/api` | HTTP client, SSE stream |
 | `internal/bridge` | IDE bridge (JSON-RPC framing over stdio) |
@@ -20,12 +25,13 @@ Single static Go binary: Anthropic Messages API client with streaming, tools, Bu
 | `internal/tui` | Bubble Tea model and views |
 | `internal/dream` | Session memory (JSON / SQLite) |
 | `design/` | Design specs and roadmap (numbered `01-…`, test plan `13`, UX `14`) |
-| `docs/` | User-facing docs (e.g. Anthropic-compatible providers) |
+| `docs/` | User-facing docs (Tutorials, How-Tos, Reference, Explanation) |
 
 ## Build and test
 
 ```bash
 CGO_ENABLED=0 go build -o drover-code ./cmd/drover-code
+CGO_ENABLED=0 go build -o ukc-agent ./cmd/ukc-agent
 CGO_ENABLED=0 go test ./...
 ```
 

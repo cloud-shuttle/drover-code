@@ -165,3 +165,27 @@ func TestReadFile_pathEscapesWorkDir(t *testing.T) {
 		t.Fatal("expected safe path error")
 	}
 }
+
+func TestReadFile_LargeFileTruncation(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "large.txt")
+	// Write a 300KB file
+	largeData := strings.Repeat("A long line of text that takes up space.\n", 7500)
+	if err := os.WriteFile(p, []byte(largeData), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := &ReadFile{WorkDir: dir}
+	out, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{"path": "large.txt"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Output should be heavily truncated by toolutil.Truncate (max 200k bytes).
+	if len(out) > 210000 {
+		t.Fatalf("expected truncated output, got length %d", len(out))
+	}
+	if !strings.Contains(out, "A long line") {
+		t.Fatalf("expected output to contain original text")
+	}
+}
