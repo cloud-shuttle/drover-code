@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS dream_entries (
 func (s *sqliteStore) Save(e Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("dream sqlite: store is closed")
+	}
 	tags, err := json.Marshal(e.Tags)
 	if err != nil {
 		return err
@@ -89,6 +92,9 @@ func (s *sqliteStore) Save(e Entry) error {
 func (s *sqliteStore) Recent(n int) ([]Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, errors.New("dream sqlite: store is closed")
+	}
 	rows, err := s.db.Query(
 		`SELECT id, ts, tags_json, content, session_id FROM dream_entries ORDER BY ts DESC LIMIT ?`,
 		n,
@@ -103,6 +109,9 @@ func (s *sqliteStore) Recent(n int) ([]Entry, error) {
 func (s *sqliteStore) All() ([]Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, errors.New("dream sqlite: store is closed")
+	}
 	rows, err := s.db.Query(
 		`SELECT id, ts, tags_json, content, session_id FROM dream_entries ORDER BY ts ASC`,
 	)
@@ -119,6 +128,9 @@ func (s *sqliteStore) Prune(r Retention) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("dream sqlite: store is closed")
+	}
 	if cutoff, ok := r.minTimestamp(); ok {
 		ts := cutoff.UTC().Format(time.RFC3339Nano)
 		if _, err := s.db.Exec(`DELETE FROM dream_entries WHERE ts < ?`, ts); err != nil {

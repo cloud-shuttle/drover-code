@@ -161,3 +161,59 @@ func TestWorker_Consolidate(t *testing.T) {
 		t.Fatalf("file: %s", data)
 	}
 }
+
+func TestWorker_Consolidate_Errors(t *testing.T) {
+	// Test empty messages (should return early)
+	w := NewWorker(nil, nil, Retention{})
+	w.consolidate(context.Background(), Session{ID: "empty"})
+
+	// Test API error
+	errSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal server error", 500)
+	}))
+	defer errSrv.Close()
+
+	client := api.NewClient("k", "m")
+	client.SetBaseURL(errSrv.URL)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.json")
+	store, _ := NewJSONStore(path)
+	w = NewWorker(store, client, Retention{})
+
+	// This should fail gracefully and not panic
+	w.consolidate(context.Background(), Session{
+		ID: "err-session",
+		Messages: []api.Message{
+			api.UserMessage("hello"),
+		},
+	})
+	
+	all, _ := store.All()
+	if len(all) != 0 {
+		t.Fatalf("expected no entries due to API error, got %d", len(all))
+	}
+
+	// Test empty response string from API
+	emptySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "event: message_stop\ndata: {}\n\n")
+	}))
+	defer emptySrv.Close()
+
+	client2 := api.NewClient("k", "m")
+	client2.SetBaseURL(emptySrv.URL)
+	w2 := NewWorker(store, client2, Retention{})
+
+	w2.consolidate(context.Background(), Session{
+		ID: "empty-res-session",
+		Messages: []api.Message{
+			api.UserMessage("hello"),
+		},
+	})
+
+	all, _ = store.All()
+	if len(all) != 0 {
+		t.Fatalf("expected no entries due to empty response, got %d", len(all))
+	}
+}

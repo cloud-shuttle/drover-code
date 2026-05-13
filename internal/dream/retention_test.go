@@ -55,3 +55,30 @@ func TestJSONStore_PruneAge(t *testing.T) {
 		t.Fatalf("got %#v", all)
 	}
 }
+
+func TestRetention_ApplyEnvOverrides(t *testing.T) {
+	t.Setenv("DROVER_CODE_DREAM_MAX_ENTRIES", "100")
+	t.Setenv("DROVER_CODE_DREAM_MAX_AGE_DAYS", "10")
+
+	var r Retention
+	r.ApplyEnvOverrides()
+
+	if r.MaxEntries != 100 {
+		t.Errorf("expected MaxEntries=100, got %d", r.MaxEntries)
+	}
+	if r.MaxAgeDays != 10 {
+		t.Errorf("expected MaxAgeDays=10, got %d", r.MaxAgeDays)
+	}
+
+	t.Setenv("DROVER_CODE_DREAM_MAX_ENTRIES", "invalid")
+	t.Setenv("DROVER_CODE_DREAM_MAX_AGE_DAYS", "-5")
+	
+	r = Retention{}
+	r.ApplyEnvOverrides()
+	if r.MaxEntries != 0 {
+		t.Errorf("expected MaxEntries=0 for invalid, got %d", r.MaxEntries)
+	}
+	if r.MaxAgeDays != 0 {
+		t.Errorf("expected MaxAgeDays=0 for negative, got %d", r.MaxAgeDays)
+	}
+}
