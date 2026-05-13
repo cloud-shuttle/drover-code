@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,8 @@ func TestE2E_StartupAndExit(t *testing.T) {
 		t.Fatalf("failed to start pty: %v", err)
 	}
 	defer func() { _ = ptmx.Close() }()
+
+	pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
 
 	// 4. Read output asynchronously
 	outputCh := make(chan string)
@@ -97,4 +100,79 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestE2E_TypingInteraction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, "drover-code")
+
+	cmdBuild := exec.Command("go", "build", "-o", binPath, "../../cmd/drover-code")
+	if out, err := cmdBuild.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
+
+	cmd := exec.Command(binPath)
+	cmd.Dir = tmpDir
+	cmd.Env = append(os.Environ(), "ANTHROPIC_API_KEY=sk-ant-api03-test-1234")
+
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatalf("failed to start pty: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
+
+	outputCh := make(chan string)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, ptmx)
+		outputCh <- buf.String()
+	}()
+
+	time.Sleep(1 * time.Second)
+
+	// Simulate typing "hello pty"
+	_, err = ptmx.Write([]byte("hello pty"))
+	if err != nil {
+		t.Fatalf("failed to write to pty: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Then send quit to exit
+	_, err = ptmx.Write([]byte("\x03")) // Ctrl+C to force quit
+	if err != nil {
+		t.Fatalf("failed to write to pty: %v", err)
+	}
+
+	waitErr := make(chan error, 1)
+	go func() {
+		waitErr <- cmd.Wait()
+	}()
+
+	select {
+	case <-waitErr:
+	case <-time.After(3 * time.Second):
+		t.Errorf("timed out waiting for process to exit")
+		_ = cmd.Process.Kill()
+	}
+
+	_ = ptmx.Close()
+	select {
+	case out := <-outputCh:
+		// Strip ANSI escape codes to make it easier to match the typed text.
+		ansiRe := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+		cleanOut := ansiRe.ReplaceAllString(out, "")
+		
+		if !strings.Contains(cleanOut, "hello pty") {
+			t.Errorf("Expected clean output to contain typed text 'hello pty', got snippet: %q", cleanOut[:min(200, len(cleanOut))])
+		}
+	case <-time.After(1 * time.Second):
+		t.Log("timed out waiting for output channel to close")
+	}
 }
