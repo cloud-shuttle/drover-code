@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,11 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/api"
 )
+
+func init() {
+	// Prevent tests from writing to the real ~/.drover/history.json
+	os.Setenv("DROVER_HISTORY_DIR", filepath.Join(os.TempDir(), "drover-test-history"))
+}
 
 func TestModel_WindowSizeSetsDimensions(t *testing.T) {
 	ch := make(chan agent.Event, 1)

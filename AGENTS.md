@@ -25,7 +25,7 @@ Welcome, AI Agent. This file is intended to help AI coding assistants understand
 | `internal/tui` | Bubble Tea model and views |
 | `internal/dream` | Session memory (JSON / SQLite) |
 | `design/` | Design specs and roadmap (numbered `01-…`, test plan `13`, UX `14`) |
-| `docs/` | User-facing docs (e.g. Anthropic-compatible providers) |
+| `docs/` | User-facing docs (Tutorials, How-Tos, Reference, Explanation) |
 
 ## Build and test
 

@@ -6,18 +6,25 @@ A single static Go binary that runs an agentic coding assistant against the Anth
 
 ## Documentation Index
 
-**Core Operational Guides:**
-- [Agents & Personas](AGENTS.md)
-- [Available Tools](docs/available-tools.md)
-- [Interaction Guidelines](docs/interaction-guidelines.md)
-- [Integration Checklist](docs/integration-checklist.md)
+**Tutorials (Learning-oriented):**
+- [Getting Started](docs/tutorials/01-getting-started.md)
 
-**Architecture & Implementation:**
-- [Architecture Overview](docs/architecture-overview.md)
-- [Implementation Requirements](docs/implementation-requirements.md)
-- [Requirements Index](docs/requirements-index.md)
-- [Unikraft Cloud Architecture](docs/unikraft-cloud-architecture.md)
-- [Anthropic Compatible Providers](docs/anthropic-compatible-providers.md)
+**How-To Guides (Problem-oriented):**
+- [Configure Custom LLM Providers](docs/how-to/configure-custom-providers.md)
+- [Interactive Diffs](docs/how-to/interactive-diffs.md)
+- [Integration Checklist](docs/how-to/integration-checklist.md)
+
+**Reference (Information-oriented):**
+- [Agent Personas & Context](AGENTS.md)
+- [Available Tools](docs/reference/available-tools.md)
+- [Implementation Requirements](docs/reference/implementation-reqs.md)
+- [Requirements Index](docs/reference/requirements-index.md)
+- [Requirements Summary](docs/reference/requirements-summary.txt)
+- [Interaction Guidelines](docs/reference/interaction-guidelines.md)
+
+**Explanation (Understanding-oriented):**
+- [Architecture Overview](docs/explanation/architecture-overview.md)
+- [Unikraft Cloud Architecture](docs/explanation/unikraft-cloud.md)
 
 **Design Specifications (`design/`):**
 - [01 Foundation](design/01-foundation.md)
@@ -43,7 +50,7 @@ A single static Go binary that runs an agentic coding assistant against the Anth
 ## Requirements
 
 - Go 1.22+
-- Anthropic-compatible API access: `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` (see [docs/anthropic-compatible-providers.md](docs/anthropic-compatible-providers.md))
+- Anthropic-compatible API access: `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` (see [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md))
 - Optional: `ANTHROPIC_BASE_URL` for non-Anthropic gateways (same doc)
 - `git` on `PATH` if you use git tools
 
@@ -72,7 +79,7 @@ echo "Summarise the README" | ANTHROPIC_API_KEY=sk-ant-... ./drover-code
 
 Headless mode is designed to run as a **non-interactive batch worker** (no TTY, no permission prompts), e.g. one job per **Unikraft unikernel** instance.
 
-> **Read more:** [Scaling Agentic Coding: Drover-Code and Unikraft Cloud](docs/unikraft-cloud-architecture.md)
+> **Read more:** [Scaling Agentic Coding: Drover-Code and Unikraft Cloud](docs/explanation/unikraft-cloud.md)
 
 - **Activation**: set `DROVER_CODE_HEADLESS=1` (recommended) or rely on non-TTY stdin.
 - **Permissions preset**: set `DROVER_CODE_PERMISSION_PRESET=unikernel` to run with an allowlist-oriented policy intended for isolated workers.
@@ -112,7 +119,7 @@ or `"model"` in `~/.claude/settings.json` or `.claude/settings.json`.
 
 drover-code targets the **Anthropic Messages API** wire format. Gateways that implement the same protocol can be used with `ANTHROPIC_BASE_URL` and the provider’s key.
 
-**Setup, examples, and troubleshooting:** [docs/anthropic-compatible-providers.md](docs/anthropic-compatible-providers.md)
+**Setup, examples, and troubleshooting:** [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md)
 
 ## Configuration
 

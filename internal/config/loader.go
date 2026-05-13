@@ -340,3 +340,18 @@ func EffectiveDisableAutoCompaction(s Settings) bool {
 		return false
 	}
 }
+
+// EffectiveDreamEnabled is true when settings or
+// DROVER_CODE_DREAM_ENABLED requests enabling Dream memory.
+func EffectiveDreamEnabled(s Settings) bool {
+	if s.DreamEnabled {
+		return true
+	}
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("DROVER_CODE_DREAM_ENABLED")))
+	switch v {
+	case "1", "true", "yes", "on", "y":
+		return true
+	default:
+		return false
+	}
+}

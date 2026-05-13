@@ -19,12 +19,17 @@ type PersistentHistory struct {
 }
 
 func NewPersistentHistory(workDir string) (*PersistentHistory, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = workDir // fallback
+	var historyDir string
+	if envDir := os.Getenv("DROVER_HISTORY_DIR"); envDir != "" {
+		historyDir = envDir
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = workDir // fallback
+		}
+		historyDir = filepath.Join(home, ".drover")
 	}
 
-	historyDir := filepath.Join(home, ".drover")
 	if err := os.MkdirAll(historyDir, 0755); err != nil {
 		return nil, err
 	}

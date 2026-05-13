@@ -272,10 +272,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showingSearch = true
 			}
 			return m, nil
-		case tea.KeyEnter:
-			if msg.Alt {
-				break
-			}
+		case tea.KeyEnter, tea.KeyCtrlJ:
 			input := strings.TrimSpace(m.textarea.Value())
 			if input != "" {
 				m.inputHistory.Add(input)
@@ -352,6 +349,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+		case tea.KeyPgUp, tea.KeyPgDown:
+			var vpCmd tea.Cmd
+			m.viewport, vpCmd = m.viewport.Update(msg)
+			cmds = append(cmds, vpCmd)
+			return m, tea.Batch(cmds...)
 		}
 
 		var taCmd tea.Cmd

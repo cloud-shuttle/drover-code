@@ -594,7 +594,7 @@ func loadConfig(workDir string) *config.Loader {
 }
 
 func setupDream(settings config.Settings, workDir string, client *api.Client) (dream.Store, *dream.Worker) {
-	if !settings.DreamEnabled {
+	if !config.EffectiveDreamEnabled(settings) {
 		return nil, nil
 	}
 	store, err := dream.OpenStore(workDir)

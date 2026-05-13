@@ -255,8 +255,8 @@ func scanEntries(rows *sql.Rows) ([]Entry, error) {
 func OpenStore(workDir string) (Store, error) {
 	backend := strings.TrimSpace(os.Getenv("DROVER_CODE_DREAM_BACKEND"))
 	if strings.EqualFold(backend, "sqlite") {
-		dbPath := filepath.Join(workDir, ".claude", "memory.db")
-		jsonPath := filepath.Join(workDir, ".claude", "memory.json")
+		dbPath := filepath.Join(workDir, ".drover", "memory.db")
+		jsonPath := filepath.Join(workDir, ".drover", "memory.json")
 		s, err := NewSQLiteStore(dbPath)
 		if err != nil {
 			return nil, err
@@ -271,6 +271,6 @@ func OpenStore(workDir string) (Store, error) {
 		}
 		return s, nil
 	}
-	path := filepath.Join(workDir, ".claude", "memory.json")
+	path := filepath.Join(workDir, ".drover", "memory.json")
 	return NewJSONStore(path)
 }
