@@ -175,10 +175,9 @@ func runWebhookServer() {
 		}
 	}()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-	signal.Stop(sigCh)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
 
 	shCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
