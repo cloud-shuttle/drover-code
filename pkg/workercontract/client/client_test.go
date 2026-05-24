@@ -1,4 +1,4 @@
-package workerclient_test
+package client_test
 
 import (
 	"archive/tar"
@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/internal/workerclient"
+	"github.com/cloudshuttle/drover-code/pkg/workercontract/client"
+	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
 )
 
 func emptyTarGz(t *testing.T) []byte {
@@ -33,7 +33,7 @@ func emptyTarGz(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-func TestRunContract(t *testing.T) {
+func TestClientLifecycle(t *testing.T) {
 	t.Parallel()
 
 	const token = "test-token"
@@ -73,24 +73,33 @@ func TestRunContract(t *testing.T) {
 	}
 	downloadDir := filepath.Join(t.TempDir(), "out")
 
-	client := workerclient.New(srv.URL, token, srv.Client())
-	result, err := workerclient.RunContract(context.Background(), client, workerclient.ContractSpec{
-		WorkDir:       workDir,
-		DownloadDir:   downloadDir,
-		Command:       "echo hi",
-		Limits:        ukc.DefaultWorkspaceLimits(),
-		MaxHealthWait: 5 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("RunContract: %v", err)
+	c := client.New(srv.URL, token, srv.Client())
+
+	ctx := context.Background()
+	if err := c.WaitReady(ctx, 5*time.Second); err != nil {
+		t.Fatalf("WaitReady: %v", err)
 	}
+
+	if err := c.UploadWorkspace(ctx, workDir, workspace.DefaultLimits()); err != nil {
+		t.Fatalf("UploadWorkspace: %v", err)
+	}
+
 	if !uploaded {
 		t.Fatal("expected workspace upload")
 	}
-	if result.ExitCode != 0 {
-		t.Fatalf("exit code = %d", result.ExitCode)
+
+	out, code, err := c.Exec(ctx, "echo hi", nil)
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
 	}
-	if !strings.Contains(result.Output, "hello") {
-		t.Fatalf("output = %q", result.Output)
+	if code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	if !strings.Contains(out, "hello") {
+		t.Fatalf("output = %q", out)
+	}
+
+	if err := c.DownloadWorkspace(ctx, downloadDir); err != nil {
+		t.Fatalf("DownloadWorkspace: %v", err)
 	}
 }

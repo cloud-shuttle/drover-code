@@ -3,13 +3,16 @@ package convo
 import (
 	"fmt"
 	"testing"
-	"testing/quick"
 
 	"github.com/cloudshuttle/drover-code/internal/api"
+	"pgregory.net/rapid"
 )
 
 func TestProperty_EstimatedTokensNonNegative(t *testing.T) {
-	err := quick.Check(func(sys, body string) bool {
+	rapid.Check(t, func(t *rapid.T) {
+		sys := rapid.String().Draw(t, "sys")
+		body := rapid.String().Draw(t, "body")
+
 		m := NewManagerWithSystem(sys)
 		m.Append(api.UserMessage(body))
 		m.Append(api.AssistantMessage([]api.ContentBlock{
@@ -19,60 +22,80 @@ func TestProperty_EstimatedTokensNonNegative(t *testing.T) {
 		m.Append(api.ToolResultMessage([]api.ToolResultBlock{
 			{ToolUseID: "x", Content: body},
 		}))
-		return m.EstimatedTokens() >= 0
-	}, &quick.Config{MaxCount: 200})
-	if err != nil {
-		t.Fatal(err)
-	}
+
+		if m.EstimatedTokens() < 0 {
+			t.Fatalf("EstimatedTokens should be non-negative, got: %d", m.EstimatedTokens())
+		}
+	})
 }
 
 func TestProperty_SummariseMessageCount(t *testing.T) {
-	err := quick.Check(func(n, k byte, summary string) bool {
-		count := int(n%30) + 1
-		keep := int(k % 30)
+	rapid.Check(t, func(t *rapid.T) {
+		count := rapid.IntRange(1, 30).Draw(t, "count")
+		keep := rapid.IntRange(0, 30).Draw(t, "keep")
+		summary := rapid.String().Draw(t, "summary")
+
 		m := NewManager()
 		for i := 0; i < count; i++ {
 			m.Append(api.UserMessage(fmt.Sprintf("m%d", i)))
 		}
+
 		before := len(m.Messages())
 		m.Summarise(summary, keep)
 		after := len(m.Messages())
+
 		if before <= keep {
-			return after == before
+			if after != before {
+				t.Fatalf("Expected %d messages after keeping %d (from %d), but got %d", before, keep, before, after)
+			}
+		} else {
+			if after != keep+1 {
+				t.Fatalf("Expected %d messages after summarising to keep %d, but got %d", keep+1, keep, after)
+			}
 		}
-		return after == keep+1
-	}, &quick.Config{MaxCount: 200})
-	if err != nil {
-		t.Fatal(err)
-	}
+	})
 }
 
 func TestProperty_SetContextLimitPositiveOnly(t *testing.T) {
-	err := quick.Check(func(limit int, sys string) bool {
+	rapid.Check(t, func(t *rapid.T) {
+		limit := rapid.Int().Draw(t, "limit")
+		sys := rapid.String().Draw(t, "sys")
+
 		m := NewManagerWithSystem(sys)
 		prev := m.ContextLimit()
 		m.SetContextLimit(limit)
 		got := m.ContextLimit()
+
 		if limit > 0 {
-			return got == limit
+			if got != limit {
+				t.Fatalf("Expected limit to be updated to %d, got %d", limit, got)
+			}
+		} else {
+			if got != prev {
+				t.Fatalf("Expected limit to remain %d when setting negative limit %d, got %d", prev, limit, got)
+			}
 		}
-		return got == prev
-	}, &quick.Config{MaxCount: 150})
-	if err != nil {
-		t.Fatal(err)
-	}
+	})
 }
 
 func TestProperty_ResetClearsHistory(t *testing.T) {
-	err := quick.Check(func(n byte, s string) bool {
+	rapid.Check(t, func(t *rapid.T) {
+		n := rapid.IntRange(0, 50).Draw(t, "n")
+		s := rapid.String().Draw(t, "s")
+
 		m := NewManagerWithSystem(s)
-		for i := 0; i < int(n%50); i++ {
+		for i := 0; i < n; i++ {
 			m.Append(api.UserMessage(fmt.Sprintf("x%d", i)))
 		}
+
 		m.Reset()
-		return len(m.Messages()) == 0 && m.SystemPrompt() == s
-	}, &quick.Config{MaxCount: 150})
-	if err != nil {
-		t.Fatal(err)
-	}
+
+		if len(m.Messages()) != 0 {
+			t.Fatalf("Expected 0 messages after reset, got %d", len(m.Messages()))
+		}
+		if m.SystemPrompt() != s {
+			t.Fatalf("Expected system prompt to remain %q, got %q", s, m.SystemPrompt())
+		}
+	})
 }
+

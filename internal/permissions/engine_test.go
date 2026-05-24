@@ -145,6 +145,7 @@ func TestEngine_WardenParticipates(t *testing.T) {
 	os.Setenv("DROVER_WARDEN_BEADS_DIR", dir)
 	defer os.Unsetenv("DROVER_WARDEN_BEADS_DIR")
 	_ = warden.Init() // ensure loaded (the wrapper's Get will also trigger)
+	defer warden.Get().Wait()
 
 	// Unikernel-style allowlist that would normally permit "bash"
 	allow, deny := MergeUnikernelPreset(nil, nil)

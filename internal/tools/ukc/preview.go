@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+// UploadSummary describes a planned workspace payload before upload.
+type UploadSummary struct {
+	FileCount  int
+	TotalBytes int64
+}
+
 // MaybeConfirmUpload shows a TTY preview and waits for Enter unless skipped.
 func MaybeConfirmUpload(stdin *os.File, stdout io.Writer, summary UploadSummary) error {
 	if stdin == nil || !isTerminal(stdin) {

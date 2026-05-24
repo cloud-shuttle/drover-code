@@ -68,6 +68,7 @@ func TestWardenWrapper_ActiveWithTempBeads_BlocksOnPolicy(t *testing.T) {
 	if Get() == nil {
 		t.Fatal("expected active Warden after setting beads dir")
 	}
+	defer Get().Wait()
 
 	dec := CheckAction(context.Background(), &droverwarden.GuardRequest{
 		TenantID: "test-tenant",

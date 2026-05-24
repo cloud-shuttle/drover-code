@@ -12,20 +12,20 @@ func TestLoader_MergeOrder_ProjectWins(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	proj := filepath.Join(home, "proj")
-	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(proj, ".drover"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".drover"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(`{"model":"global-m","permissionMode":"default","dreamEnabled":false}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".drover", "settings.json"), []byte(`{"model":"global-m","permissionMode":"default","dreamEnabled":false}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"), []byte(`{"model":"proj-m","dreamEnabled":true}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(proj, ".drover", "settings.json"), []byte(`{"model":"proj-m","dreamEnabled":true}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.local.json"), []byte(`{"model":"local-m","env":{"FOO":"bar"}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(proj, ".drover", "settings.local.json"), []byte(`{"model":"local-m","env":{"FOO":"bar"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -45,20 +45,68 @@ func TestLoader_MergeOrder_ProjectWins(t *testing.T) {
 	}
 }
 
-func TestLoader_DreamRetentionMerge(t *testing.T) {
+func TestLoader_LegacyClaudePathsStillLoad(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+
 	proj := filepath.Join(home, "proj")
 	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"), []byte(`{"model":"legacy-m"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(`{"dreamMaxRetentionEntries":1000}`), 0o644); err != nil {
+
+	l := NewLoader(proj)
+	if err := l.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := l.Get().Model; got != "legacy-m" {
+		t.Fatalf("model: got %q want legacy-m", got)
+	}
+}
+
+func TestLoader_DroverOverridesLegacyClaudeAtSameTier(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	proj := filepath.Join(home, "proj")
+	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"), []byte(`{"dreamMaxRetentionEntries":40,"dreamMaxRetentionAgeDays":90}`), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(proj, ".drover"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"), []byte(`{"model":"legacy-m"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".drover", "settings.json"), []byte(`{"model":"drover-m"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	l := NewLoader(proj)
+	if err := l.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := l.Get().Model; got != "drover-m" {
+		t.Fatalf("model: got %q want drover-m", got)
+	}
+}
+
+func TestLoader_DreamRetentionMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	proj := filepath.Join(home, "proj")
+	if err := os.MkdirAll(filepath.Join(proj, ".drover"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".drover"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".drover", "settings.json"), []byte(`{"dreamMaxRetentionEntries":1000}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".drover", "settings.json"), []byte(`{"dreamMaxRetentionEntries":40,"dreamMaxRetentionAgeDays":90}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	l := NewLoader(proj)
@@ -93,10 +141,10 @@ func TestLoader_ProjectMarkdownIgnoreGlobs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(proj, "CLAUDE.md"), []byte("root"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(proj, ".drover"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"), []byte(`{"projectMarkdownIgnoreGlobs":["vendor/**"]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(proj, ".drover", "settings.json"), []byte(`{"projectMarkdownIgnoreGlobs":["vendor/**"]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,10 +196,10 @@ func TestLoader_ProjectMarkdownByteCap(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	proj := filepath.Join(home, "proj")
-	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(proj, ".drover"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"), []byte(`{"projectMarkdownMaxBytes":800}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(proj, ".drover", "settings.json"), []byte(`{"projectMarkdownMaxBytes":800}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(proj, "CLAUDE.md"), []byte(strings.Repeat("x", 5000)), 0o644); err != nil {
@@ -173,10 +221,10 @@ func TestLoader_ProjectMarkdownByteCap(t *testing.T) {
 
 func TestLoader_Save_MergesProjectFile(t *testing.T) {
 	proj := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(proj, ".drover"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"), []byte(`{"model":"old"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(proj, ".drover", "settings.json"), []byte(`{"model":"old"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -186,6 +234,9 @@ func TestLoader_Save_MergesProjectFile(t *testing.T) {
 	}
 	if err := l.Save(Settings{MaxTokens: 4096}); err != nil {
 		t.Fatalf("Save: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".drover", "settings.json")); err != nil {
+		t.Fatalf("Save should write .drover/settings.json: %v", err)
 	}
 	if err := l.Load(); err != nil {
 		t.Fatal(err)

@@ -1,6 +1,9 @@
 // Package config loads and merges drover-code settings from the three-level
-// hierarchy: global (~/.claude/settings.json) → project (.claude/settings.json)
-// → local (.claude/settings.local.json).
+// hierarchy: global (~/.drover/settings.json) → project (.drover/settings.json)
+// → local (.drover/settings.local.json).
+//
+// Legacy Claude Code paths (~/.claude and .claude at each level) are still read
+// when present; drover paths override claude paths at the same tier.
 //
 // It also walks the directory tree for CLAUDE.md files and concatenates them
 // into a system-prompt injection.
@@ -69,8 +72,19 @@ func NewLoader(workDir string) *Loader {
 	home, _ := os.UserHomeDir()
 	return &Loader{
 		workDir:    workDir,
-		globalDir:  filepath.Join(home, ".claude"),
-		projectDir: filepath.Join(workDir, ".claude"),
+		globalDir:  filepath.Join(home, ".drover"),
+		projectDir: filepath.Join(workDir, ".drover"),
+	}
+}
+
+func settingsLoadPaths(home, workDir string) []string {
+	return []string{
+		filepath.Join(home, ".claude", "settings.json"),
+		filepath.Join(home, ".drover", "settings.json"),
+		filepath.Join(workDir, ".claude", "settings.json"),
+		filepath.Join(workDir, ".drover", "settings.json"),
+		filepath.Join(workDir, ".claude", "settings.local.json"),
+		filepath.Join(workDir, ".drover", "settings.local.json"),
 	}
 }
 
@@ -80,11 +94,8 @@ func (l *Loader) Load() error {
 	defer l.mu.Unlock()
 
 	var merged Settings
-	paths := []string{
-		filepath.Join(l.globalDir, "settings.json"),
-		filepath.Join(l.projectDir, "settings.json"),
-		filepath.Join(l.projectDir, "settings.local.json"),
-	}
+	home, _ := os.UserHomeDir()
+	paths := settingsLoadPaths(home, l.workDir)
 
 	for _, p := range paths {
 		data, err := os.ReadFile(p)

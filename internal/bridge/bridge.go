@@ -192,6 +192,10 @@ func (b *Bridge) readMessageSync() (Message, error) {
 		return Message{}, fmt.Errorf("missing Content-Length")
 	}
 
+	if contentLength > 32*1024*1024 { // 32 MiB limit
+		return Message{}, fmt.Errorf("message too large: %d bytes exceeds 32MiB limit", contentLength)
+	}
+
 	body := make([]byte, contentLength)
 	if _, err := io.ReadFull(b.r, body); err != nil {
 		return Message{}, fmt.Errorf("read body: %w", err)

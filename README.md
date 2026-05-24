@@ -17,8 +17,9 @@ Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML fro
 - [Integration Checklist](docs/how-to/integration-checklist.md)
 
 **Reference (Information-oriented):**
-- [Agent Personas & Context](AGENTS.md)
+- [Agent Personas & Context](docs/reference/agent-context.md)
 - [Available Tools](docs/reference/available-tools.md)
+- [Environment Variables](docs/reference/environment-variables.md)
 - [Implementation Requirements](docs/reference/implementation-reqs.md)
 - [Requirements Index](docs/reference/requirements-index.md)
 - [Requirements Summary](docs/reference/requirements-summary.txt)
@@ -28,26 +29,26 @@ Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML fro
 - [Architecture Overview](docs/explanation/architecture-overview.md)
 - [Unikraft Cloud Architecture](docs/explanation/unikraft-cloud.md)
 
-**Design Specifications (`design/`):**
-- [01 Foundation](design/01-foundation.md)
-- [02 Agent Loop](design/02-agent-loop.md)
-- [03 Tools Overview](design/03-tools-overview.md)
-- [04 FS Tools](design/04-fs-tools.md)
-- [05 Shell Search Tools](design/05-shell-search-tools.md)
-- [06 Git Web Tools](design/06-git-web-tools.md)
-- [07 TUI](design/07-tui.md)
-- [08 Config & Permissions](design/08-config-permissions-undercover.md)
-- [09 Advanced Systems](design/09-advanced-systems.md)
-- [10 Integrations](design/10-integrations.md)
-- [11 Headless Orchestration](design/11-headless-orchestration.md)
-- [12 Property Fuzz Testing](design/12-property-fuzz-testing.md)
-- [13 Test Coverage Plan](design/13-test-coverage-plan.md)
-- [14 UX Memory Improvements](design/14-ux-memory-improvements.md)
-- [15 UKC Tools](design/15-ukc-tools.md)
-- [16 UKC Workspace Sync](design/16-ukc-workspace-sync.md)
-- [17 Custom Commands](design/17-custom-commands.md)
-- [Claude Go Design Spec](design/claude-go-design-spec.md)
-- [Claude Go Test Spec](design/claude-go-test-spec.md)
+**Architecture Decision Records (`docs/adr/`):**
+- [01 Foundation](docs/adr/01-foundation.md)
+- [02 Agent Loop](docs/adr/02-agent-loop.md)
+- [03 Tools Overview](docs/adr/03-tools-overview.md)
+- [04 FS Tools](docs/adr/04-fs-tools.md)
+- [05 Shell Search Tools](docs/adr/05-shell-search-tools.md)
+- [06 Git Web Tools](docs/adr/06-git-web-tools.md)
+- [07 TUI](docs/adr/07-tui.md)
+- [08 Config & Permissions](docs/adr/08-config-permissions-undercover.md)
+- [09 Advanced Systems](docs/adr/09-advanced-systems.md)
+- [10 Integrations](docs/adr/10-integrations.md)
+- [11 Headless Orchestration](docs/adr/11-headless-orchestration.md)
+- [12 Property Fuzz Testing](docs/adr/12-property-fuzz-testing.md)
+- [13 Test Coverage Plan](docs/adr/13-test-coverage-plan.md)
+- [14 UX Memory Improvements](docs/adr/14-ux-memory-improvements.md)
+- [15 UKC Tools](docs/adr/15-ukc-tools.md)
+- [16 UKC Workspace Sync](docs/adr/16-ukc-workspace-sync.md)
+- [17 Custom Commands](docs/adr/17-custom-commands.md)
+- [Claude Go Design Spec](docs/adr/claude-go-design-spec.md)
+- [Claude Go Test Spec](docs/adr/claude-go-test-spec.md)
 
 ## Requirements
 
@@ -115,7 +116,7 @@ export CLAUDE_CODE_COORDINATOR_MODE=1
 export ANTHROPIC_MODEL=claude-haiku-4-5-20251001
 ```
 
-or `"model"` in `~/.claude/settings.json` or `.claude/settings.json`.
+or `"model"` in `~/.drover/settings.json` or `.drover/settings.json`.
 
 ## Other LLM providers (Moonshot, GLM, …)
 
@@ -125,11 +126,11 @@ drover-code targets the **Anthropic Messages API** wire format. Gateways that im
 
 ## Configuration
 
-Settings merge in order:
+Settings merge in order (legacy `~/.claude` / `.claude` paths at each tier are still read when present; drover wins at the same tier):
 
-1. `~/.claude/settings.json`
-2. `<workdir>/.claude/settings.json`
-3. `<workdir>/.claude/settings.local.json`
+1. `~/.drover/settings.json`
+2. `<workdir>/.drover/settings.json`
+3. `<workdir>/.drover/settings.local.json`
 
 `CLAUDE.md` files under the working tree are concatenated and injected into the system prompt.
 

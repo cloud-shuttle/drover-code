@@ -120,10 +120,10 @@ func Run(ctx context.Context, in RunInput) (RunOutput, error) {
 		WorkDir:       in.WorkDir,
 		DownloadDir:   in.DownloadDir,
 		Command:       command,
-		Limits:        ukc.DefaultWorkspaceLimits(),
 		OnStreamLine:  in.OnStreamLine,
 		MaxHealthWait: 90 * time.Second,
 	})
+
 	if err != nil {
 		_ = emitIfPossible(in.OnStreamLine, "status", fmt.Sprintf(`{"event":"ukc_instance_lifecycle","phase":"destroyed","uuid":"%s","ended_at":"%s","reason":"error"}`, inst.UUID, time.Now().UTC().Format(time.RFC3339)))
 		return RunOutput{Output: result.Output}, err

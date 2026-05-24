@@ -23,7 +23,8 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/internal/workerclient"
+	"github.com/cloudshuttle/drover-code/pkg/workercontract/client"
+	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
 )
 
 const maxCoordinatorSubtasks = 8
@@ -340,17 +341,11 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 	}
 
 	name := fmt.Sprintf("drover-worker-%d-%d", st.Index, time.Now().Unix())
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Provisioning UKC instance %s...\n", st.Index+1, name)}
-
-	// Create instance
-	token, _ := ukc.RandToken()
-	cfg := mgr.Config()
+	
 	env := map[string]string{
-		"AGENT_TOKEN":                  token,
 		"DROVER_CODE_HEADLESS":         "1",
 		"DROVER_CODE_PERMISSION_PRESET": "unikernel",
 	}
-	// Forward LLM API keys and configuration to the remote workers
 	for _, k := range []string{
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
 		"ANTHROPIC_MODEL", "OPENAI_MODEL", "GEMINI_MODEL",
@@ -360,74 +355,13 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 		}
 	}
 
-	img := cfg.DefaultImage
+	img := mgr.Config().DefaultImage
 	if customImage != "" {
 		img = customImage
 	}
 
-	inst, err := ukc.CreateInstance(ctx, cfg, name, img, 512, env)
-	if err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
-	}
-
-	// Fetch the complete Service Group object to get the Domains if they aren't included inline
-	if inst.ServiceGroup != nil && inst.ServiceGroup.UUID != "" && len(inst.ServiceGroup.Domains) == 0 {
-		sg, err := ukc.GetServiceGroup(ctx, cfg, inst.ServiceGroup.UUID)
-		if err == nil {
-			inst.ServiceGroup = &sg
-		} else {
-			return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "failed to get service group: " + err.Error()}, err
-		}
-	}
-
-	instURL := ukc.InstanceHTTPSURL(inst)
-	if instURL == "" {
-		// Cleanup the instance if we couldn't get a URL
-		_ = ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "Could not determine public HTTPS URL for Unikraft instance"}, fmt.Errorf("empty instance URL")
-	}
-
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance created, waiting for health check at %s...\n", st.Index+1, instURL)}
-
-	// Always cleanup worker instance (ADR 0003 instance lifecycle).
-	defer func() {
-		_ = ukc.UnregisterActiveJob(inst.UUID)
-		if err := ukc.DeleteInstance(context.Background(), cfg, inst.UUID); err != nil {
-			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to destroy UKC instance %s: %v\n", st.Index+1, name, err)}
-		} else {
-			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
-		}
-	}()
-	_ = ukc.RegisterActiveJob(inst.UUID, name)
-
-	wc := workerclient.New(instURL, token, cfg.HTTPClient)
-
-	if err := wc.WaitReady(ctx, cfg.MaxHealthWait); err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "instance health timeout: " + err.Error()}, err
-	}
-
-	baseSHA, _ := gitHeadSHA(ctx, c.workDir)
-	if baseSHA != "" {
-		short := baseSHA
-		if len(short) > 8 {
-			short = short[:8]
-		}
-		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Base SHA: %s\n", st.Index+1, short)}
-	}
-
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Uploading local workspace to cloud instance...\n", st.Index+1)}
-	summary, err := ukc.PlanWorkspaceUpload(c.workDir, ukc.DefaultWorkspaceLimits())
-	if err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "workspace plan: " + err.Error()}, err
-	}
-	if err := ukc.MaybeConfirmUpload(os.Stdin, os.Stdout, summary); err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
-	}
-	if err := wc.UploadWorkspace(ctx, c.workDir, ukc.DefaultWorkspaceLimits()); err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "upload workspace failed: " + err.Error()}, err
-	}
-
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance ready, executing headless task...\n", st.Index+1)}
+	downloadDir := filepath.Join(st.IsolatedDir, "workspace_downloaded")
+	_ = os.RemoveAll(downloadDir)
 
 	safeTask := strings.ReplaceAll(st.Description, "'", "'\\''")
 	command := fmt.Sprintf("drover-code --headless --prompt '%s'", safeTask)
@@ -450,38 +384,54 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 			typ, _ := ev["type"].(string)
 			switch typ {
 			case "tool_start":
-				name, _ := ev["name"].(string)
-				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🔨 using tool: %s\n", st.Index+1, name)}
+				toolName, _ := ev["name"].(string)
+				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🔨 using tool: %s\n", st.Index+1, toolName)}
 			case "heartbeat":
 				turn, _ := ev["turn"].(float64)
 				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🧠 thinking... (turn %d)\n", st.Index+1, int(turn))}
 			}
 		}
 	}
-	outStr, exitCode, err := wc.Exec(ctx, command, onLine)
+
+	baseSHA, _ := gitHeadSHA(ctx, c.workDir)
+	if baseSHA != "" {
+		short := baseSHA
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Base SHA: %s\n", st.Index+1, short)}
+	}
+
+	res, err := client.RunAgentJob(ctx, mgr.Config(), client.JobSpec{
+		Name:         name,
+		Image:        img,
+		MemoryMB:     512,
+		Env:          env,
+		Command:      command,
+		WorkDir:      c.workDir,
+		DownloadDir:  downloadDir,
+		Limits:       workspace.DefaultLimits(),
+		OnEvent: func(msg string) {
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] %s\n", st.Index+1, msg)}
+		},
+		OnStreamLine: onLine,
+	})
 
 	if err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
 	}
-	if exitCode != 0 {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: outStr}, fmt.Errorf("remote task exited with %d", exitCode)
+	if res.ExitCode != 0 {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: res.Output}, fmt.Errorf("remote task exited with %d", res.ExitCode)
 	}
 
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Task complete. Downloading modified workspace...\n", st.Index+1)}
-	downloadDir := filepath.Join(st.IsolatedDir, "workspace_downloaded")
-	_ = os.RemoveAll(downloadDir)
-	if err := wc.DownloadWorkspace(ctx, downloadDir); err != nil {
-		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to download workspace: %v\n", st.Index+1, err)}
-	} else {
-		if err := c.syncDownloadedWorkspace(ctx, st, downloadDir, baseSHA); err != nil {
-			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to merge workspace: %v\n", st.Index+1, err)}
-		}
+	if err := c.syncDownloadedWorkspace(ctx, st, downloadDir, baseSHA); err != nil {
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to merge workspace: %v\n", st.Index+1, err)}
 	}
 
 	return WorkerResult{
 		Index:  st.Index,
 		Task:   st.Description,
-		Output: outStr,
+		Output: res.Output,
 	}, nil
 }
 

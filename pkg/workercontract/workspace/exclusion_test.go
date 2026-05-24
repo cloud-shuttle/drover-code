@@ -1,4 +1,4 @@
-package ukc
+package workspace
 
 import (
 	"os"
@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-func TestPlanWorkspaceUpload_respectsGitignoreAndSecrets(t *testing.T) {
+func TestPlanUpload_respectsGitignoreAndSecrets(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "src", "main.go"), "package main\n")
 	writeFile(t, filepath.Join(root, ".env"), "SECRET=1\n")
 	writeFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "x")
 	writeFile(t, filepath.Join(root, ".gitignore"), "node_modules/\n")
 
-	summary, err := PlanWorkspaceUpload(root, DefaultWorkspaceLimits())
+	summary, err := PlanUpload(root, DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,11 +22,11 @@ func TestPlanWorkspaceUpload_respectsGitignoreAndSecrets(t *testing.T) {
 	}
 }
 
-func TestPlanWorkspaceUpload_rejectsOversizedFile(t *testing.T) {
+func TestPlanUpload_rejectsOversizedFile(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "big.bin"), string(make([]byte, 64)))
 
-	_, err := PlanWorkspaceUpload(root, WorkspaceLimits{MaxFileBytes: 32, MaxTotalBytes: 1024})
+	_, err := PlanUpload(root, Limits{MaxFileBytes: 32, MaxTotalBytes: 1024})
 	if err == nil {
 		t.Fatal("expected size error")
 	}

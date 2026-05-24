@@ -81,4 +81,33 @@ func TestRetention_ApplyEnvOverrides(t *testing.T) {
 	if r.MaxAgeDays != 0 {
 		t.Errorf("expected MaxAgeDays=0 for negative, got %d", r.MaxAgeDays)
 	}
+
+	t.Setenv("DROVER_CODE_DREAM_MAX_ENTRIES", "0")
+	t.Setenv("DROVER_CODE_DREAM_MAX_AGE_DAYS", "0")
+	
+	r = Retention{MaxEntries: 50, MaxAgeDays: 5} // start non-zero
+	r.ApplyEnvOverrides()
+	if r.MaxEntries != 0 {
+		t.Errorf("expected MaxEntries=0 when explicitly overriden to 0, got %d", r.MaxEntries)
+	}
+	if r.MaxAgeDays != 0 {
+		t.Errorf("expected MaxAgeDays=0 when explicitly overriden to 0, got %d", r.MaxAgeDays)
+	}
+}
+
+func TestRetention_Active(t *testing.T) {
+	r1 := Retention{MaxEntries: 0, MaxAgeDays: 0}
+	if r1.Active() {
+		t.Errorf("Retention{0,0} should not be active")
+	}
+
+	r2 := Retention{MaxEntries: 1, MaxAgeDays: 0}
+	if !r2.Active() {
+		t.Errorf("Retention{1,0} should be active")
+	}
+
+	r3 := Retention{MaxEntries: 0, MaxAgeDays: 1}
+	if !r3.Active() {
+		t.Errorf("Retention{0,1} should be active")
+	}
 }
