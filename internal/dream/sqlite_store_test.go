@@ -56,7 +56,7 @@ func TestOpenStore_sqliteEnv(t *testing.T) {
 	if err := s.Save(Entry{ID: "x", Timestamp: time.Now().UTC(), Content: "hello"}); err != nil {
 		t.Fatal(err)
 	}
-	dbPath := filepath.Join(dir, ".claude", "memory.db")
+	dbPath := filepath.Join(dir, ".drover", "memory.db")
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("expected sqlite file: %v", err)
 	}
@@ -114,11 +114,11 @@ func TestOpenStore_migratesJSONWhenSQLiteEmpty(t *testing.T) {
 	t.Setenv("DROVER_CODE_DREAM_BACKEND", "sqlite")
 	t.Setenv("DROVER_CODE_DREAM_SKIP_JSON_IMPORT", "")
 	dir := t.TempDir()
-	claudeDir := filepath.Join(dir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+	droverDir := filepath.Join(dir, ".drover")
+	if err := os.MkdirAll(droverDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	jsonPath := filepath.Join(claudeDir, "memory.json")
+	jsonPath := filepath.Join(droverDir, "memory.json")
 	payload := `[{"id":"legacy-1","timestamp":"2020-01-15T12:00:00Z","tags":[],"content":"from json","session_id":"s"}]`
 	if err := os.WriteFile(jsonPath, []byte(payload), 0o644); err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestOpenStore_migratesJSONWhenSQLiteEmpty(t *testing.T) {
 	if all[0].Content != "from json" || all[0].ID != "legacy-1" {
 		t.Fatalf("entry: %#v", all[0])
 	}
-	if _, err := os.Stat(jsonPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(droverDir, "memory.json")); !os.IsNotExist(err) {
 		t.Fatalf("json should be renamed after import: stat err=%v", err)
 	}
 	bak := jsonPath + ".imported"
@@ -147,11 +147,11 @@ func TestOpenStore_skipsImportWhenEnvSet(t *testing.T) {
 	t.Setenv("DROVER_CODE_DREAM_BACKEND", "sqlite")
 	t.Setenv("DROVER_CODE_DREAM_SKIP_JSON_IMPORT", "1")
 	dir := t.TempDir()
-	claudeDir := filepath.Join(dir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+	droverDir := filepath.Join(dir, ".drover")
+	if err := os.MkdirAll(droverDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	jsonPath := filepath.Join(claudeDir, "memory.json")
+	jsonPath := filepath.Join(droverDir, "memory.json")
 	if err := os.WriteFile(jsonPath, []byte(`[{"id":"x","timestamp":"2020-01-15T12:00:00Z","content":"c"}]`), 0o644); err != nil {
 		t.Fatal(err)
 	}

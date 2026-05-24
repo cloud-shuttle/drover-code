@@ -10,54 +10,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/cloudshuttle/drover-code/internal/workspace"
 )
 
-var rootExcludes = []string{
-	"drover-local",
-	"drover-code",
-	"claude-go",
-	"ukc-agent",
-	"cmd/ukc-agent/ukc-agent",
-	"bin",
-	"unikraft",
-}
 
-var anywhereExcludes = []string{
-	".git",
-	"node_modules",
-	"dist",
-	"target",
-	"__pycache__",
-	".venv",
-	"venv",
-	".unikraft",
-	".drover-code-workers",
-}
-
-func shouldExclude(relPath string) bool {
-	relPath = filepath.ToSlash(relPath)
-
-	for _, ex := range rootExcludes {
-		if relPath == ex || strings.HasPrefix(relPath, ex+"/") {
-			return true
-		}
-	}
-
-	for _, ex := range anywhereExcludes {
-		if relPath == ex || strings.HasPrefix(relPath, ex+"/") || strings.Contains(relPath, "/"+ex+"/") || strings.HasSuffix(relPath, "/"+ex) {
-			return true
-		}
-	}
-	return false
-}
 
 // UploadWorkspace streams a tar.gz of the local directory to the UKC agent's /workspace endpoint.
 func UploadWorkspace(ctx context.Context, cfg Config, inst Instance, localDir string, agentToken string) error {
-	return UploadWorkspaceWithLimits(ctx, cfg, inst, localDir, agentToken, DefaultWorkspaceLimits())
+	return UploadWorkspaceWithLimits(ctx, cfg, inst, localDir, agentToken, workspace.DefaultWorkspaceLimits())
 }
 
 // UploadWorkspaceWithLimits applies workspace exclusion and size caps before upload.
-func UploadWorkspaceWithLimits(ctx context.Context, cfg Config, inst Instance, localDir, agentToken string, limits WorkspaceLimits) error {
+func UploadWorkspaceWithLimits(ctx context.Context, cfg Config, inst Instance, localDir, agentToken string, limits workspace.WorkspaceLimits) error {
 	return UploadWorkspaceAt(ctx, cfg.HTTPClient, InstanceHTTPSURL(inst), agentToken, localDir, limits)
 }
 
@@ -87,9 +52,9 @@ func uploadWorkspaceStream(ctx context.Context, client *http.Client, baseURL, ag
 }
 
 // UploadWorkspaceAt uploads localDir to the worker runtime at baseURL.
-func UploadWorkspaceAt(ctx context.Context, client *http.Client, baseURL, agentToken, localDir string, limits WorkspaceLimits) error {
-	limits = limits.normalize()
-	filter, err := newWorkspaceFilter(localDir)
+func UploadWorkspaceAt(ctx context.Context, client *http.Client, baseURL, agentToken, localDir string, limits workspace.WorkspaceLimits) error {
+	limits = limits.Normalize()
+	filter, err := workspace.NewWorkspaceFilter(localDir)
 	if err != nil {
 		return err
 	}
@@ -120,7 +85,7 @@ func UploadWorkspaceAt(ctx context.Context, client *http.Client, baseURL, agentT
 			}
 			relPath = filepath.ToSlash(relPath)
 
-			if filter.skipWalk(relPath, info) {
+			if filter.SkipWalk(relPath, info) {
 				if info.IsDir() {
 					return filepath.SkipDir
 				}

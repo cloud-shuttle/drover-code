@@ -1,4 +1,4 @@
-package ukc
+package workspace
 
 import (
 	"fmt"
@@ -28,7 +28,7 @@ func DefaultWorkspaceLimits() WorkspaceLimits {
 	}
 }
 
-func (l WorkspaceLimits) normalize() WorkspaceLimits {
+func (l WorkspaceLimits) Normalize() WorkspaceLimits {
 	if l.MaxFileBytes <= 0 {
 		l.MaxFileBytes = DefaultMaxFileBytes
 	}
@@ -47,8 +47,8 @@ type UploadSummary struct {
 // PlanWorkspaceUpload walks localDir and returns file count and total bytes that
 // would be included after workspace exclusion rules.
 func PlanWorkspaceUpload(localDir string, limits WorkspaceLimits) (UploadSummary, error) {
-	limits = limits.normalize()
-	filter, err := newWorkspaceFilter(localDir)
+	limits = limits.Normalize()
+	filter, err := NewWorkspaceFilter(localDir)
 	if err != nil {
 		return UploadSummary{}, err
 	}
@@ -67,7 +67,7 @@ func PlanWorkspaceUpload(localDir string, limits WorkspaceLimits) (UploadSummary
 		}
 		relPath = filepath.ToSlash(relPath)
 
-		if filter.skipWalk(relPath, info) {
+		if filter.SkipWalk(relPath, info) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -90,13 +90,13 @@ func PlanWorkspaceUpload(localDir string, limits WorkspaceLimits) (UploadSummary
 	return summary, err
 }
 
-type workspaceFilter struct {
+type WorkspaceFilter struct {
 	root     string
 	matchers []*gitignore.GitIgnore
 }
 
-func newWorkspaceFilter(root string) (*workspaceFilter, error) {
-	f := &workspaceFilter{root: root}
+func NewWorkspaceFilter(root string) (*WorkspaceFilter, error) {
+	f := &WorkspaceFilter{root: root}
 	for _, name := range []string{".gitignore", ".droverignore"} {
 		path := filepath.Join(root, name)
 		m, err := gitignore.CompileIgnoreFile(path)
@@ -111,7 +111,7 @@ func newWorkspaceFilter(root string) (*workspaceFilter, error) {
 	return f, nil
 }
 
-func (f *workspaceFilter) skipWalk(relPath string, info os.FileInfo) bool {
+func (f *WorkspaceFilter) SkipWalk(relPath string, info os.FileInfo) bool {
 	if shouldExclude(relPath) {
 		return true
 	}
@@ -138,6 +138,45 @@ func isSecretPath(relPath string) bool {
 	}
 	if strings.HasPrefix(strings.ToLower(base), "credentials") {
 		return true
+	}
+	return false
+}
+
+var rootExcludes = []string{
+	"drover-local",
+	"drover-code",
+	"claude-go",
+	"ukc-agent",
+	"cmd/ukc-agent/ukc-agent",
+	"bin",
+	"unikraft",
+}
+
+var anywhereExcludes = []string{
+	".git",
+	"node_modules",
+	"dist",
+	"target",
+	"__pycache__",
+	".venv",
+	"venv",
+	".unikraft",
+	".drover-code-workers",
+}
+
+func shouldExclude(relPath string) bool {
+	relPath = filepath.ToSlash(relPath)
+
+	for _, ex := range rootExcludes {
+		if relPath == ex || strings.HasPrefix(relPath, ex+"/") {
+			return true
+		}
+	}
+
+	for _, ex := range anywhereExcludes {
+		if relPath == ex || strings.HasPrefix(relPath, ex+"/") || strings.Contains(relPath, "/"+ex+"/") || strings.HasSuffix(relPath, "/"+ex) {
+			return true
+		}
 	}
 	return false
 }

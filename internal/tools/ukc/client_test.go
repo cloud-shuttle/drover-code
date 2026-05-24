@@ -1,4 +1,4 @@
-package workerclient_test
+package ukc_test
 
 import (
 	"archive/tar"
@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/internal/workerclient"
+	"github.com/cloudshuttle/drover-code/internal/workspace"
 )
 
 func emptyTarGz(t *testing.T) []byte {
@@ -73,12 +73,12 @@ func TestRunContract(t *testing.T) {
 	}
 	downloadDir := filepath.Join(t.TempDir(), "out")
 
-	client := workerclient.New(srv.URL, token, srv.Client())
-	result, err := workerclient.RunContract(context.Background(), client, workerclient.ContractSpec{
+	client := ukc.New(srv.URL, token, srv.Client())
+	result, err := ukc.RunContract(context.Background(), client, ukc.ContractSpec{
 		WorkDir:       workDir,
 		DownloadDir:   downloadDir,
 		Command:       "echo hi",
-		Limits:        ukc.DefaultWorkspaceLimits(),
+		Limits:        workspace.DefaultWorkspaceLimits(),
 		MaxHealthWait: 5 * time.Second,
 	})
 	if err != nil {

@@ -1,4 +1,4 @@
-package ukc
+package workspace
 
 import (
 	"os"

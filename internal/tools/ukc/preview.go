@@ -6,10 +6,12 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/cloudshuttle/drover-code/internal/workspace"
 )
 
 // MaybeConfirmUpload shows a TTY preview and waits for Enter unless skipped.
-func MaybeConfirmUpload(stdin *os.File, stdout io.Writer, summary UploadSummary) error {
+func MaybeConfirmUpload(stdin *os.File, stdout io.Writer, summary workspace.UploadSummary) error {
 	if stdin == nil || !isTerminal(stdin) {
 		return nil
 	}

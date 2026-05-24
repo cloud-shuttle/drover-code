@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +16,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/config"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
+	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 )
 
@@ -131,6 +133,25 @@ func NewProgram(
 						b.WriteString("\nTip: Run `/commands init` to add more starter commands.")
 					}
 					convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: b.String()}}))
+					return nil
+				} else if cmdName == "score" {
+					if len(parts) < 2 {
+						convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: "Usage: `/score <value> [comment...]`"}}))
+						return nil
+					}
+					val, err := strconv.ParseFloat(parts[1], 64)
+					if err != nil {
+						convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: fmt.Sprintf("Invalid score: %v", err)}}))
+						return nil
+					}
+					comment := strings.Join(parts[2:], " ")
+					traceID := loop.LastTraceID()
+					if traceID == "" {
+						convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: "No previous trace to score."}}))
+						return nil
+					}
+					telemetry.TracerFrom(ctx).Score(traceID, "user_feedback", val, telemetry.ScoreSourceHuman, comment)
+					convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: fmt.Sprintf("✅ Score %v recorded for trace `%s`", val, traceID)}}))
 					return nil
 				}
 

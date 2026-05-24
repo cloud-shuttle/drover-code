@@ -21,9 +21,10 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/config"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
+	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/internal/workerclient"
+	"github.com/cloudshuttle/drover-code/internal/workspace"
 )
 
 const maxCoordinatorSubtasks = 8
@@ -115,18 +116,46 @@ Task: %s`, task)
 	mgr := convo.NewManager()
 	mgr.Append(api.UserMessage(prompt))
 
-	stream, err := c.client.StreamMessage(ctx, api.StreamRequest{
+	req := api.StreamRequest{
 		Messages:  mgr.Messages(),
 		MaxTokens: 512,
+	}
+
+	tracer := telemetry.TracerFrom(ctx)
+	genID := tracer.StartGeneration(telemetry.GenerationParams{
+		TraceID:   telemetry.TraceIDFrom(ctx),
+		Name:      "coordinator-decompose",
+		Model:     c.client.Model(),
+		Input:     req.Messages,
+		System:    req.System,
+		MaxTokens: req.MaxTokens,
 	})
+
+	var usage api.Usage
+	var stopReason string
+	var streamErr error
+	var raw strings.Builder
+
+	defer func() {
+		tracer.EndGeneration(genID, telemetry.GenerationResult{
+			Output:       extractJSON(raw.String()),
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			StopReason:   stopReason,
+			Error:        streamErr,
+		})
+	}()
+
+	stream, err := c.client.StreamMessage(ctx, req)
 	if err != nil {
+		streamErr = err
 		return nil, err
 	}
 	defer stream.Close()
 
-	var raw strings.Builder
 	for stream.Next() {
-		if e, ok := stream.Event().(api.ContentBlockDeltaEvent); ok {
+		switch e := stream.Event().(type) {
+		case api.ContentBlockDeltaEvent:
 			if td, ok := e.Delta.(api.TextDelta); ok {
 				raw.WriteString(td.Text)
 				select {
@@ -134,10 +163,15 @@ Task: %s`, task)
 				default:
 				}
 			}
+		case api.MessageDeltaEvent:
+			usage.InputTokens = e.InputTokens
+			usage.OutputTokens = e.OutputTokens
+			stopReason = e.StopReason
 		}
 	}
 	if stream.Err() != nil {
-		return nil, stream.Err()
+		streamErr = stream.Err()
+		return nil, streamErr
 	}
 	select {
 	case c.eventCh <- agent.TextDeltaEvent{Text: "\n"}:
@@ -365,42 +399,24 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 		img = customImage
 	}
 
-	inst, err := ukc.CreateInstance(ctx, cfg, name, img, 512, env)
+	var wc ukc.Client
+	err = wc.Provision(ctx, cfg, name, img, 512, env)
 	if err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
 	}
 
-	// Fetch the complete Service Group object to get the Domains if they aren't included inline
-	if inst.ServiceGroup != nil && inst.ServiceGroup.UUID != "" && len(inst.ServiceGroup.Domains) == 0 {
-		sg, err := ukc.GetServiceGroup(ctx, cfg, inst.ServiceGroup.UUID)
-		if err == nil {
-			inst.ServiceGroup = &sg
-		} else {
-			return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "failed to get service group: " + err.Error()}, err
-		}
-	}
-
-	instURL := ukc.InstanceHTTPSURL(inst)
-	if instURL == "" {
-		// Cleanup the instance if we couldn't get a URL
-		_ = ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "Could not determine public HTTPS URL for Unikraft instance"}, fmt.Errorf("empty instance URL")
-	}
-
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance created, waiting for health check at %s...\n", st.Index+1, instURL)}
-
 	// Always cleanup worker instance (ADR 0003 instance lifecycle).
 	defer func() {
-		_ = ukc.UnregisterActiveJob(inst.UUID)
-		if err := ukc.DeleteInstance(context.Background(), cfg, inst.UUID); err != nil {
+		_ = ukc.UnregisterActiveJob(wc.Inst.UUID)
+		if err := wc.Destroy(context.Background()); err != nil {
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to destroy UKC instance %s: %v\n", st.Index+1, name, err)}
 		} else {
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
 		}
 	}()
-	_ = ukc.RegisterActiveJob(inst.UUID, name)
+	_ = ukc.RegisterActiveJob(wc.Inst.UUID, name)
 
-	wc := workerclient.New(instURL, token, cfg.HTTPClient)
+	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance created, waiting for health check at %s...\n", st.Index+1, wc.BaseURL)}
 
 	if err := wc.WaitReady(ctx, cfg.MaxHealthWait); err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "instance health timeout: " + err.Error()}, err
@@ -416,14 +432,14 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 	}
 
 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Uploading local workspace to cloud instance...\n", st.Index+1)}
-	summary, err := ukc.PlanWorkspaceUpload(c.workDir, ukc.DefaultWorkspaceLimits())
+	summary, err := workspace.PlanWorkspaceUpload(c.workDir, workspace.DefaultWorkspaceLimits())
 	if err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "workspace plan: " + err.Error()}, err
 	}
 	if err := ukc.MaybeConfirmUpload(os.Stdin, os.Stdout, summary); err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
 	}
-	if err := wc.UploadWorkspace(ctx, c.workDir, ukc.DefaultWorkspaceLimits()); err != nil {
+	if err := wc.UploadWorkspace(ctx, c.workDir, workspace.DefaultWorkspaceLimits()); err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "upload workspace failed: " + err.Error()}, err
 	}
 
@@ -550,18 +566,46 @@ func (c *Coordinator) synthesise(ctx context.Context, originalTask string, resul
 	mgr := convo.NewManager()
 	mgr.Append(api.UserMessage(b.String()))
 
-	stream, err := c.client.StreamMessage(ctx, api.StreamRequest{
+	req := api.StreamRequest{
 		Messages:  mgr.Messages(),
 		MaxTokens: 2048,
+	}
+
+	tracer := telemetry.TracerFrom(ctx)
+	genID := tracer.StartGeneration(telemetry.GenerationParams{
+		TraceID:   telemetry.TraceIDFrom(ctx),
+		Name:      "coordinator-synthesise",
+		Model:     c.client.Model(),
+		Input:     req.Messages,
+		System:    req.System,
+		MaxTokens: req.MaxTokens,
 	})
+
+	var usage api.Usage
+	var stopReason string
+	var streamErr error
+	var summary strings.Builder
+
+	defer func() {
+		tracer.EndGeneration(genID, telemetry.GenerationResult{
+			Output:       summary.String(),
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			StopReason:   stopReason,
+			Error:        streamErr,
+		})
+	}()
+
+	stream, err := c.client.StreamMessage(ctx, req)
 	if err != nil {
+		streamErr = err
 		return "", err
 	}
 	defer stream.Close()
 
-	var summary strings.Builder
 	for stream.Next() {
-		if e, ok := stream.Event().(api.ContentBlockDeltaEvent); ok {
+		switch e := stream.Event().(type) {
+		case api.ContentBlockDeltaEvent:
 			if td, ok := e.Delta.(api.TextDelta); ok {
 				summary.WriteString(td.Text)
 				select {
@@ -569,10 +613,15 @@ func (c *Coordinator) synthesise(ctx context.Context, originalTask string, resul
 				default:
 				}
 			}
+		case api.MessageDeltaEvent:
+			usage.InputTokens = e.InputTokens
+			usage.OutputTokens = e.OutputTokens
+			stopReason = e.StopReason
 		}
 	}
 	if stream.Err() != nil {
-		return "", stream.Err()
+		streamErr = stream.Err()
+		return "", streamErr
 	}
 	return summary.String(), nil
 }

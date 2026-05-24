@@ -50,7 +50,11 @@ func TestWardenWrapper_DisabledReturnsAllow(t *testing.T) {
 func TestWardenWrapper_ActiveWithTempBeads_BlocksOnPolicy(t *testing.T) {
 	resetForTest()
 
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("", "beads-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
 	// Minimal policy that blocks any "bash" tool call (action type)
 	// Policy that triggers the DangerousArgs path for tool "bash" (the warden action matcher
 	// sets matched=true when a dangerous_arg is found in the "command" value).
@@ -95,7 +99,11 @@ func TestWardenWrapper_DefaultBeadsResolution(t *testing.T) {
 	os.Unsetenv("DROVER_WARDEN_BEADS_DIR")
 
 	// Create a temp tree that looks like a default layout the resolver understands
-	root := t.TempDir()
+	root, err := os.MkdirTemp("", "beads-default-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
 	beadsDir := filepath.Join(root, "beads")
 	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
 		t.Fatal(err)

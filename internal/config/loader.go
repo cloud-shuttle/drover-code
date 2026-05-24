@@ -29,6 +29,12 @@ type CommandConfig struct {
 	Subtask     bool   `json:"subtask,omitempty" yaml:"subtask,omitempty"`
 }
 
+// MCPServerConfig defines an external MCP server to connect to.
+type MCPServerConfig struct {
+	Command []string          `json:"command"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
 // Settings is the merged configuration from all three levels.
 type Settings struct {
 	Model                      string                   `json:"model,omitempty"`
@@ -44,6 +50,7 @@ type Settings struct {
 	UndercoverMode             *bool                    `json:"undercoverMode,omitempty"`
 	Env                        map[string]string        `json:"env,omitempty"`
 	Commands                   map[string]CommandConfig `json:"commands,omitempty"`
+	MCPServers                 map[string]MCPServerConfig `json:"mcpServers,omitempty"`
 	ContextLimitEstimate       int                      `json:"contextLimitEstimate,omitempty"`
 	CharsPerTokenEstimate      int                      `json:"charsPerTokenEstimate,omitempty"`
 	ProjectMarkdownMaxBytes    int                      `json:"projectMarkdownMaxBytes,omitempty"`
@@ -328,6 +335,12 @@ func mergeInto(dst *Settings, src Settings) {
 			dst.Commands = make(map[string]CommandConfig)
 		}
 		dst.Commands[k] = v
+	}
+	for k, v := range src.MCPServers {
+		if dst.MCPServers == nil {
+			dst.MCPServers = make(map[string]MCPServerConfig)
+		}
+		dst.MCPServers[k] = v
 	}
 }
 

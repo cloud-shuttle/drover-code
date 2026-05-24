@@ -72,6 +72,14 @@ type Loop struct {
 
 	// autoCompaction when false skips ensureContextCompacted (API may still 400 on huge context).
 	autoCompaction bool
+
+	// lastTraceID stores the ID of the most recent trace created by this loop.
+	lastTraceID string
+}
+
+// LastTraceID returns the TraceID of the most recent run, useful for attaching feedback.
+func (l *Loop) LastTraceID() string {
+	return l.lastTraceID
 }
 
 // NewLoop constructs a Loop.
@@ -129,12 +137,14 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 	traceOwnedByLoop := traceID == ""
 	if traceOwnedByLoop {
 		traceID = tracer.StartTrace(telemetry.TraceParams{
-			Name:  "agent-run",
-			Input: input,
-			Tags:  []string{"drover-code"},
+			Name:      "agent-run",
+			Input:     input,
+			SessionID: telemetry.SessionIDFrom(ctx),
+			Tags:      []string{"drover-code"},
 		})
 		ctx = telemetry.WithTraceID(ctx, traceID)
 	}
+	l.lastTraceID = traceID
 
 	var finalOutput string
 	var runErr error

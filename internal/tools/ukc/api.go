@@ -299,13 +299,20 @@ func InstanceHTTPSURL(inst Instance) string {
 		host := strings.TrimSpace(inst.ServiceGroup.Domains[0].FQDN)
 		host = strings.TrimSuffix(host, ".")
 		if host != "" {
+			if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+				return host
+			}
 			return "https://" + host
 		}
 	}
 	
 	// Fallback (will probably 404 since port 443 is on the SG, not the instance)
 	if inst.FQDN != "" {
-		return "https://" + strings.TrimSuffix(inst.FQDN, ".")
+		host := strings.TrimSuffix(inst.FQDN, ".")
+		if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+			return host
+		}
+		return "https://" + host
 	}
 	if inst.Name != "" && inst.Metro != "" {
 		return fmt.Sprintf("https://%s.%s0.unikraft.app", inst.Name, inst.Metro)

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/coordinator"
 	"github.com/cloudshuttle/drover-code/internal/dream"
 	github "github.com/cloudshuttle/drover-code/internal/github"
+	"github.com/cloudshuttle/drover-code/internal/mcp"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
@@ -131,8 +133,12 @@ func main() {
 	lf := telemetry.New(telemetry.ConfigFromEnv())
 	defer lf.Flush()
 
-	ctx, cancel := signal.NotifyContext(telemetry.WithTracer(context.Background(), lf), syscall.SIGINT, syscall.SIGTERM)
+	sessionID := fmt.Sprintf("session-%x", time.Now().UnixNano())
+	baseCtx := telemetry.WithSessionID(context.Background(), sessionID)
+	ctx, cancel := signal.NotifyContext(telemetry.WithTracer(baseCtx, lf), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	mcp.RegisterAll(ctx, registry, settings)
 
 	// Custom commands setup
 	cmdLoader := commands.NewLoader(workDir)
@@ -380,6 +386,25 @@ func runHeadless(
 						fmt.Fprintf(os.Stderr, "  /%-15s - %s (Risk: %d)\n", c.Name, c.Description, c.RiskTier)
 					}
 				}
+				return false
+			} else if cmdName == "score" {
+				if len(parts) < 2 {
+					fmt.Fprintln(os.Stderr, "Usage: /score <value> [comment...]")
+					return false
+				}
+				val, err := strconv.ParseFloat(parts[1], 64)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Invalid score: %v\n", err)
+					return false
+				}
+				comment := strings.Join(parts[2:], " ")
+				traceID := loop.LastTraceID()
+				if traceID == "" {
+					fmt.Fprintln(os.Stderr, "No previous trace to score.")
+					return false
+				}
+				telemetry.TracerFrom(ctx).Score(traceID, "user_feedback", val, telemetry.ScoreSourceHuman, comment)
+				fmt.Fprintf(os.Stderr, "Score %v recorded for trace %s\n", val, traceID)
 				return false
 			}
 
