@@ -59,10 +59,32 @@ func minInt(a, b int) int {
 // Client sends requests to the Anthropic Messages API.
 // Use NewClient to construct one.
 type Client struct {
-	apiKey     string
-	baseURL    string
-	model      string
-	httpClient *http.Client
+	apiKey       string
+	baseURL      string
+	model        string
+	httpClient   *http.Client
+	extraHeaders map[string]string
+}
+
+// SetExtraHeaders replaces outbound HTTP headers (e.g. Gateway x-bf-dim-* dimensions).
+func (c *Client) SetExtraHeaders(headers map[string]string) {
+	if len(headers) == 0 {
+		c.extraHeaders = nil
+		return
+	}
+	c.extraHeaders = make(map[string]string, len(headers))
+	for k, v := range headers {
+		if strings.TrimSpace(k) == "" || v == "" {
+			continue
+		}
+		c.extraHeaders[k] = v
+	}
+}
+
+func (c *Client) applyExtraHeaders(req *http.Request) {
+	for k, v := range c.extraHeaders {
+		req.Header.Set(k, v)
+	}
 }
 
 // SetBaseURL overrides the API base URL (primarily for tests).
@@ -125,6 +147,7 @@ func (c *Client) StreamMessage(ctx context.Context, req StreamRequest) (*Stream,
 		httpReq.Header.Set("anthropic-version", anthropicVersion)
 		httpReq.Header.Set("content-type", "application/json")
 		httpReq.Header.Set("accept", "text/event-stream")
+		c.applyExtraHeaders(httpReq)
 
 		resp, err := c.httpClient.Do(httpReq)
 		if err != nil {

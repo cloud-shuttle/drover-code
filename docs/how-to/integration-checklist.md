@@ -1,3 +1,15 @@
+---
+title: Integration checklist
+description: Developer checklist for wiring Drover Code into IDEs, webhooks, coordinators, and hosted execution.
+product: drover-code
+audience: platform-operator
+doc_type: how-to
+topics:
+  - agent-jobs
+  - deployment
+surface: repo-docs
+---
+
 # Integration Points & Developer Checklist
 
 A practical guide to implementing features and maintaining integration points in drover-code.

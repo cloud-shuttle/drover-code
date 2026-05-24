@@ -1,3 +1,14 @@
+---
+title: Interaction guidelines
+description: Conventions for agent prompts, tool use, and developer interaction patterns in Drover Code.
+product: drover-code
+audience: platform-operator
+doc_type: reference
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Interaction Guidelines for drover-code Development
 
 This document helps maintain productive momentum when working with agentic contributors on drover-code and related projects.

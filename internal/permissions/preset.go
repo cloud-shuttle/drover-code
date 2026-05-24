@@ -27,18 +27,19 @@ var unikernelAllowTools = []string{
 	"git_add",
 	"git_commit",
 	"git_create_branch",
+	"review_my_changes",
 	"web_fetch",
-	"ukc_create",
-	"ukc_exec",
-	"ukc_delete",
-	"ukc_delete_all",
-	"ukc_list",
 }
 
 // unikernelDenyTools is always denied for the unikernel preset unless the
 // merged deny list is the only source — deny wins over config allows.
 var unikernelDenyTools = []string{
 	"git_push",
+	"ukc_create",
+	"ukc_exec",
+	"ukc_delete",
+	"ukc_delete_all",
+	"ukc_list",
 }
 
 // MergeUnikernelPreset combines the built-in unikernel allow/deny lists with
@@ -87,4 +88,43 @@ func keysSorted(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// IntersectWithApproved further restricts an allowlist to only the tools explicitly
+// approved for a governed hosted job (via DROVER_APPROVED_TOOLS and
+// DROVER_APPROVED_MCP_CLIENTS environment variables).
+//
+// This is used for real UKC/Kraftcloud workers to enforce the Muster-approved
+// allowlist as defense-in-depth inside the worker, in addition to the Gateway/Guard layer.
+func IntersectWithApproved(allow, approvedTools, approvedClients []string) []string {
+	if len(approvedTools) == 0 && len(approvedClients) == 0 {
+		return allow
+	}
+
+	approved := make(map[string]bool, len(approvedTools)+len(approvedClients))
+	for _, t := range approvedTools {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			approved[t] = true
+		}
+	}
+	for _, c := range approvedClients {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			approved[c] = true
+		}
+	}
+
+	if len(approved) == 0 {
+		return allow
+	}
+
+	result := make([]string, 0, len(allow))
+	for _, t := range allow {
+		t = strings.TrimSpace(t)
+		if t != "" && approved[t] {
+			result = append(result, t)
+		}
+	}
+	return result
 }

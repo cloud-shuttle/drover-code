@@ -1,3 +1,16 @@
+---
+title: Scaling agentic coding with Unikraft Cloud
+description: Why remote Drover Code workers on unikernels enable secure, parallel agent execution.
+product: drover-code
+audience: evaluator
+doc_type: explanation
+topics:
+  - agent-jobs
+  - deployment
+  - security
+surface: repo-docs
+---
+
 # Scaling Agentic Coding: Drover-Code and Unikraft Cloud
 
 This document outlines the architecture, philosophy, and advantages of orchestrating remote agentic workers using **drover-code** and **Unikraft Cloud**. 

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +23,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
+	"github.com/cloudshuttle/drover-code/internal/workerclient"
 )
 
 const maxCoordinatorSubtasks = 8
@@ -166,6 +166,13 @@ func (c *Coordinator) executeWorkers(ctx context.Context, subtasks []Subtask) ([
 
 	var customImage string
 	if c.settings.CoordinatorRemote {
+		if mgr, ok, err := ukc.NewManagerFromEnv(); ok && err == nil {
+			if n, err := ukc.ReconcileOrphanInstances(ctx, mgr.Config(), 2*time.Hour); err != nil {
+				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n⚠️ Orphan reconciliation failed: %v\n", err)}
+			} else if n > 0 {
+				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n🧹 Reconciled %d orphaned worker instance(s)\n", n)}
+			}
+		}
 		var err error
 		customImage, err = c.buildCustomToolchain(ctx)
 		if err != nil {
@@ -339,7 +346,9 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 	token, _ := ukc.RandToken()
 	cfg := mgr.Config()
 	env := map[string]string{
-		"AGENT_TOKEN": token,
+		"AGENT_TOKEN":                  token,
+		"DROVER_CODE_HEADLESS":         "1",
+		"DROVER_CODE_PERMISSION_PRESET": "unikernel",
 	}
 	// Forward LLM API keys and configuration to the remote workers
 	for _, k := range []string{
@@ -380,22 +389,41 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 
 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance created, waiting for health check at %s...\n", st.Index+1, instURL)}
 
-	// Always cleanup
+	// Always cleanup worker instance (ADR 0003 instance lifecycle).
 	defer func() {
-		// err := ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
-		// if err != nil {
-		// 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to destroy UKC instance %s: %v\n", st.Index+1, name, err)}
-		// } else {
-		// 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
-		// }
+		_ = ukc.UnregisterActiveJob(inst.UUID)
+		if err := ukc.DeleteInstance(context.Background(), cfg, inst.UUID); err != nil {
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to destroy UKC instance %s: %v\n", st.Index+1, name, err)}
+		} else {
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
+		}
 	}()
+	_ = ukc.RegisterActiveJob(inst.UUID, name)
 
-	if err := ukc.WaitForHealth(ctx, cfg.HTTPClient, instURL, token, cfg.MaxHealthWait); err != nil {
+	wc := workerclient.New(instURL, token, cfg.HTTPClient)
+
+	if err := wc.WaitReady(ctx, cfg.MaxHealthWait); err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "instance health timeout: " + err.Error()}, err
 	}
 
+	baseSHA, _ := gitHeadSHA(ctx, c.workDir)
+	if baseSHA != "" {
+		short := baseSHA
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Base SHA: %s\n", st.Index+1, short)}
+	}
+
 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Uploading local workspace to cloud instance...\n", st.Index+1)}
-	if err := ukc.UploadWorkspace(ctx, cfg, inst, c.workDir, token); err != nil {
+	summary, err := ukc.PlanWorkspaceUpload(c.workDir, ukc.DefaultWorkspaceLimits())
+	if err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "workspace plan: " + err.Error()}, err
+	}
+	if err := ukc.MaybeConfirmUpload(os.Stdin, os.Stdout, summary); err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
+	}
+	if err := wc.UploadWorkspace(ctx, c.workDir, ukc.DefaultWorkspaceLimits()); err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "upload workspace failed: " + err.Error()}, err
 	}
 
@@ -404,22 +432,6 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 	safeTask := strings.ReplaceAll(st.Description, "'", "'\\''")
 	command := fmt.Sprintf("drover-code --headless --prompt '%s'", safeTask)
 
-	body, _ := json.Marshal(map[string]string{"command": command})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(instURL, "/")+"/exec", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := cfg.HTTPClient.Do(req)
-	if err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "exec POST: " + err.Error()}, err
-	}
-	defer resp.Body.Close()
-	var postResp struct { JobID string `json:"job_id"` }
-	if err := json.NewDecoder(resp.Body).Decode(&postResp); err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "exec POST decode: " + err.Error()}, err
-	}
-
-	streamURL := strings.TrimRight(instURL, "/") + "/exec/" + postResp.JobID + "/stream"
 	var onLine func(string)
 	if c.settings.Verbose {
 		onLine = func(payload string) {
@@ -446,7 +458,7 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 			}
 		}
 	}
-	outStr, exitCode, err := ukc.ReadExecStream(ctx, cfg.HTTPClient, streamURL, token, onLine)
+	outStr, exitCode, err := wc.Exec(ctx, command, onLine)
 
 	if err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
@@ -458,10 +470,10 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Task complete. Downloading modified workspace...\n", st.Index+1)}
 	downloadDir := filepath.Join(st.IsolatedDir, "workspace_downloaded")
 	_ = os.RemoveAll(downloadDir)
-	if err := ukc.DownloadWorkspace(ctx, cfg, inst, downloadDir, token); err != nil {
+	if err := wc.DownloadWorkspace(ctx, downloadDir); err != nil {
 		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to download workspace: %v\n", st.Index+1, err)}
 	} else {
-		if err := c.syncDownloadedWorkspace(ctx, st, downloadDir); err != nil {
+		if err := c.syncDownloadedWorkspace(ctx, st, downloadDir, baseSHA); err != nil {
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to merge workspace: %v\n", st.Index+1, err)}
 		}
 	}
@@ -565,7 +577,16 @@ func (c *Coordinator) synthesise(ctx context.Context, originalTask string, resul
 	return summary.String(), nil
 }
 
-func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, downloadedDir string) error {
+func gitHeadSHA(ctx context.Context, workDir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, downloadedDir, baseSHA string) error {
 	c.gitMu.Lock()
 	defer c.gitMu.Unlock()
 
@@ -612,7 +633,7 @@ func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, d
 	if len(bytes.TrimSpace(outBytes)) == 0 {
 		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ No changes produced by worker to commit.\n", st.Index+1)}
 	} else {
-		if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "commit", "-m", fmt.Sprintf("AI Gen: %s", st.Description)).Run(); err != nil {
+		if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "commit", "-m", fmt.Sprintf("AI Gen: %s\n\nBase-SHA: %s", st.Description, baseSHA)).Run(); err != nil {
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to commit changes: %v\n", st.Index+1, err)}
 		} else {
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ✅ Workspace committed to branch `%s`\n", st.Index+1, branchName)}

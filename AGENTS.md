@@ -18,6 +18,7 @@ Welcome, AI Agent. This file is intended to help AI coding assistants understand
 | `internal/api` | HTTP client, SSE stream |
 | `internal/bridge` | IDE bridge (JSON-RPC framing over stdio) |
 | `internal/config` | Settings merge, `CLAUDE.md` / markdown injection |
+| `internal/integrations/sqlforge` | Detect `sqlforge.yml`; inject SQLForge CLI guidance |
 | `internal/convo` | Conversation state, compaction heuristics |
 | `internal/coordinator` | Multi-worker coordinator mode |
 | `internal/github` | Webhook server, parser, runner |
@@ -49,6 +50,7 @@ Fuzz targets are listed in `.github/workflows/ci.yml` (`fuzz` job).
 
 - End-user overview, env vars, and modes: `README.md`.
 - `internal/config` walks upward from `workDir` and merges `CLAUDE.md` files into the system prompt. If this repository is the working directory, **this** `CLAUDE.md` is included like any other project instructions file.
+- When `sqlforge.yml` is found at a project root, SQLForge CLI guidance is appended automatically. How-to: `docs/how-to/sqlforge-from-drover-code.md`.
 
 ## Optional evals
 

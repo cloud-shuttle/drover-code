@@ -30,6 +30,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/tui"
 	"github.com/cloudshuttle/drover-code/internal/undercover"
+	"github.com/cloudshuttle/drover-code/internal/warden"
 	"github.com/cloudshuttle/drover-code/pkg/guardclient"
 )
 
@@ -39,6 +40,25 @@ const defaultModel = "claude-haiku-4-5-20251001"
 var startupFlags cliFlags
 
 func main() {
+	// Initialize Warden (Option B — lower risk, earlier gate) if DROVER_WARDEN_BEADS_DIR is set.
+	// This enables semantic JSONL policy enforcement on tool calls and LLM I/O.
+	_ = warden.Init()
+
+	// Optional: send Warden decisions to ClickHouse for correlation with Guard in ClickStack/HyperDX
+	if dsn := os.Getenv("DROVER_WARDEN_CLICKHOUSE_DSN"); dsn != "" {
+		if err := warden.InitClickHouseLogger(dsn); err != nil {
+			log.Printf("warning: failed to init Warden ClickHouse logger: %v", err)
+		}
+	}
+
+	// Initialize real OTEL LoggerProvider (OTLP exporter + batch + resource) so that
+	// warden.emitWardenDecisionAsOTELLog actually emits structured logs (drover.warden.*)
+	// via the platform collector into ClickHouse (correlates with Guard via guard_events MV).
+	// Fully driven by standard env vars (OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME, etc).
+	// Best-effort: warnings only, binary continues if collector unreachable or unset.
+	otelShutdown := telemetry.SetupOTELLogger(context.Background())
+	defer func() { _ = otelShutdown(context.Background()) }()
+
 	// Subcommand dispatch: `drover-code webhook` starts the webhook server.
 	if len(os.Args) > 1 && os.Args[1] == "webhook" {
 		runWebhookServer()
@@ -100,9 +120,7 @@ func main() {
 	sysPrompt := buildSystemPrompt(workDir, cfg.SystemInjection(), undercoverActive)
 
 	client := api.NewClient(apiKey, modelStr)
-	if u := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); u != "" {
-		client.SetBaseURL(u)
-	}
+	api.ApplyGatewayEnv(client)
 	mgr := convo.NewManagerWithSystem(sysPrompt)
 	config.ApplyConvoHeuristics(mgr, settings)
 	registry := tools.NewRegistry()
@@ -160,9 +178,7 @@ func runWebhookServer() {
 	}
 
 	client := api.NewClient(apiKey, defaultModel)
-	if u := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); u != "" {
-		client.SetBaseURL(u)
-	}
+	api.ApplyGatewayEnv(client)
 	ghClient := github.NewClient(ghToken)
 	runner := github.NewRunner(ghClient, client, workBase)
 	srv := github.NewServer(runner, webhookSecret)
@@ -254,6 +270,22 @@ func runTUI(
 // Phase 5: DROVER_CODE_TIMEOUT_SECS (wall-clock, child of signal ctx) → exit 4 on deadline.
 // DROVER_CODE_MAX_TOKENS caps cumulative assistant output tokens only (not context/input size) → exit 4.
 
+func parseCSVEnv(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func headlessPermissionEngine(settings config.Settings, workDir string) *permissions.Engine {
 	rulesPath := filepath.Join(workDir, ".claude", "permissions.json")
 	preset := strings.ToLower(strings.TrimSpace(os.Getenv("DROVER_CODE_PERMISSION_PRESET")))
@@ -268,6 +300,15 @@ func headlessPermissionEngine(settings config.Settings, workDir string) *permiss
 		)
 	case permissions.PresetUnikernel:
 		allow, deny := permissions.MergeUnikernelPreset(settings.AllowedTools, settings.DeniedTools)
+
+		// For governed hosted jobs (real UKC workers), further restrict to only the
+		// tools/clients approved by Muster for this specific job.
+		if ref := strings.TrimSpace(os.Getenv("DROVER_AGENT_DEFINITION_REF")); ref != "" {
+			approvedTools := parseCSVEnv("DROVER_APPROVED_TOOLS")
+			approvedClients := parseCSVEnv("DROVER_APPROVED_MCP_CLIENTS")
+			allow = permissions.IntersectWithApproved(allow, approvedTools, approvedClients)
+		}
+
 		return permissions.NewEngine(
 			permissions.ModeAllowlist,
 			allow,
@@ -346,7 +387,9 @@ func runHeadless(
 				input = expanded
 				// Handle model/agent overrides if set
 				if cmdDef.Model != "" {
-					loop.SetClient(api.NewClient(os.Getenv("ANTHROPIC_API_KEY"), cmdDef.Model))
+					loopClient := api.NewClient(anthropicAPIKey(), cmdDef.Model)
+					api.ApplyGatewayEnv(loopClient)
+					loop.SetClient(loopClient)
 				}
 			} else if !strings.Contains(err.Error(), "not found") {
 				if strings.Contains(err.Error(), "Drover Guard") {

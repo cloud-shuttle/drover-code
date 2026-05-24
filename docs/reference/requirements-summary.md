@@ -1,3 +1,14 @@
+---
+title: Requirements summary
+description: Condensed module, API, and integration requirements for Drover Code implementation.
+product: drover-code
+audience: platform-operator
+doc_type: reference
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 ================================================================================
 DROVER-CODE: REQUIRED MODULES, APIs & INTEGRATION POINTS
 ================================================================================

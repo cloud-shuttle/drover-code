@@ -1,3 +1,16 @@
+---
+title: Getting started with Drover Code
+description: Install the static Go binary, configure API access, and run your first agentic coding session.
+product: drover-code
+audience:
+  - evaluator
+  - platform-operator
+doc_type: tutorial
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Getting Started with Drover Code
 
 Welcome to Drover Code! This tutorial will guide you through setting up and running your first autonomous agentic coding assistant using the Anthropic API. 

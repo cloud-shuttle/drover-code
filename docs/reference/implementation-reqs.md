@@ -1,3 +1,14 @@
+---
+title: Implementation requirements
+description: Complete implementation requirements and acceptance criteria for Drover Code features.
+product: drover-code
+audience: platform-operator
+doc_type: reference
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Drover-Code: Complete Implementation Requirements
 
 This document identifies all required modules, APIs, and integration points that need to be implemented to build a complete drover-code system.

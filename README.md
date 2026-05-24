@@ -6,6 +6,8 @@ A single static Go binary that runs an agentic coding assistant against the Anth
 
 ## Documentation Index
 
+Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML frontmatter per the org [content taxonomy](../docs/taxonomy.yaml). Validate with [`scripts/validate-content-frontmatter.sh`](scripts/validate-content-frontmatter.sh).
+
 **Tutorials (Learning-oriented):**
 - [Getting Started](docs/tutorials/01-getting-started.md)
 

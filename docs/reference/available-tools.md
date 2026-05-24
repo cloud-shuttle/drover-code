@@ -1,3 +1,16 @@
+---
+title: Available tools
+description: Reference of built-in agent tools exposed to Drover Code during a run.
+product: drover-code
+audience:
+  - platform-operator
+  - agent
+doc_type: reference
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Available Tools
 
 This document lists all the tools implemented in drover-code and their purposes.

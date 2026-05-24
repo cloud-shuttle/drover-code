@@ -1,3 +1,14 @@
+---
+title: Requirements index
+description: Master index linking Drover Code requirements, integration guides, and reference docs.
+product: drover-code
+audience: platform-operator
+doc_type: reference
+topics:
+  - documentation
+surface: repo-docs
+---
+
 # Drover-Code Requirements & Integration Guide — Master Index
 
 ## Overview

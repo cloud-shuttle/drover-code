@@ -19,6 +19,8 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloudshuttle/drover-code/internal/warden"
+	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
 )
 
 const (
@@ -149,6 +151,19 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 
 	l.convo.Append(api.UserMessage(input))
 
+	// Input Guard (Warden) — run on the latest user message for prompt injection / policy violations
+	lastUser := input
+	idec := warden.CheckInput(ctx, &droverwarden.GuardRequest{
+		TenantID: os.Getenv("DROVER_TENANT_ID"),
+		Input:    lastUser,
+		Context: map[string]any{
+			"agent_id": os.Getenv("DROVER_AGENT_ID"),
+		},
+	})
+	if !idec.Allowed {
+		return fmt.Errorf("input blocked by Warden: %s", idec.Result.Reason)
+	}
+
 	stopHeartbeat := make(chan struct{})
 	defer close(stopHeartbeat)
 	if d := heartbeatInterval(); d > 0 {
@@ -201,6 +216,26 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 			if tc, ok := b.(api.ToolUseBlock); ok {
 				calls = append(calls, tc)
 			}
+		}
+
+		// Output Guard (Warden) after model response (post collection for accurate context).
+		// Runs for every assistant turn; text-only final answers and interleaved tool-use turns.
+		// Guards generated content before DoneEvent or tool execution.
+		// (Action-level guards still run per-call inside execute path.)
+		textOut := concatTextFromBlocks(blocks)
+		odec := warden.CheckOutput(ctx, &droverwarden.GuardRequest{
+			TenantID: os.Getenv("DROVER_TENANT_ID"),
+			Output:   textOut,
+			Context: map[string]any{
+				"agent_id":  os.Getenv("DROVER_AGENT_ID"),
+				"turn":      turn,
+				"has_tools": len(calls) > 0,
+			},
+		})
+		if !odec.Allowed {
+			runErr = fmt.Errorf("output blocked by Warden: %s", odec.Result.Reason)
+			l.emit(ErrorEvent{Err: runErr})
+			return runErr
 		}
 
 		// No tool calls → the model is done; return to the user.
@@ -755,6 +790,26 @@ exec:
 		Name:     call.Name,
 		Input:    json.RawMessage(call.Input),
 	})
+
+	// Warden Action Guard (semantic safety via JSONL Beads) — now also feeds unified decisions via permissions.Engine.
+	wdec := warden.CheckAction(ctx, &droverwarden.GuardRequest{
+		TenantID: os.Getenv("DROVER_TENANT_ID"),
+		ToolCall: &droverwarden.ToolCall{
+			ToolName: call.Name,
+			Args:     func() map[string]any { var a map[string]any; _ = json.Unmarshal(call.Input, &a); return a }(),
+		},
+		Context: map[string]any{
+			"agent_id":  os.Getenv("DROVER_AGENT_ID"),
+			"raw_input": string(call.Input),
+		},
+	})
+	if !wdec.Allowed {
+		execErr := fmt.Errorf("tool blocked by Warden: %s", wdec.Result.Reason)
+		summary := truncate(execErr.Error(), 80)
+		tr.EndSpan(spanID, telemetry.SpanResult{Output: summary, IsError: true, Error: execErr})
+		l.emit(ToolDoneEvent{CallIndex: idx, ID: call.ID, Name: call.Name, IsError: true, OutputSummary: summary})
+		return api.ToolResultBlock{ToolUseID: call.ID, Content: execErr.Error(), IsError: true}, nil
+	}
 
 	output, execErr := l.registry.Execute(ctx, call.Name, call.Input)
 

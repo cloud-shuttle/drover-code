@@ -12,6 +12,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/cloudshuttle/drover-code/internal/telemetry"
+	"github.com/cloudshuttle/drover-code/internal/warden"
 )
 
 const (
@@ -26,6 +29,21 @@ const (
 )
 
 func main() {
+	// Initialize Warden for semantic safety on hosted UKC workers (Option B).
+	_ = warden.Init()
+
+	// Optional: send Warden decisions to ClickHouse (same ClickStack instance used by Guard)
+	if dsn := os.Getenv("DROVER_WARDEN_CLICKHOUSE_DSN"); dsn != "" {
+		if err := warden.InitClickHouseLogger(dsn); err != nil {
+			log.Printf("warning: failed to init Warden ClickHouse logger: %v", err)
+		}
+	}
+
+	// Real OTEL exporter config for Warden semantic logs (OTLP → collector → guard_events).
+	// Mirrors the setup in drover-code main; enables unified view in HyperDX governance dashboard.
+	otelShutdown := telemetry.SetupOTELLogger(context.Background())
+	defer func() { _ = otelShutdown(context.Background()) }()
+
 	token := strings.TrimSpace(os.Getenv("AGENT_TOKEN"))
 	if token == "" {
 		log.Fatal("ukc-agent: AGENT_TOKEN is required")

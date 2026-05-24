@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
+	"github.com/cloudshuttle/drover-code/internal/warden"
 	"github.com/cloudshuttle/drover-code/pkg/guardclient"
 )
-
 type Executor struct {
 	guardClient *guardclient.Client
 	registry    *CommandRegistry
@@ -40,15 +41,16 @@ func (e *Executor) EvaluateAndExpand(ctx context.Context, cmdName string, rawArg
 		return "", nil, err
 	}
 
+	agentID := os.Getenv("DROVER_AGENT_ID")
+	if agentID == "" {
+		agentID = "drover-code-agent"
+	}
+	tenantID := os.Getenv("DROVER_TENANT_ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	if e.guardClient != nil {
-		agentID := os.Getenv("DROVER_AGENT_ID")
-		if agentID == "" {
-			agentID = "drover-code-agent"
-		}
-		tenantID := os.Getenv("DROVER_TENANT_ID")
-		if tenantID == "" {
-			tenantID = "default"
-		}
 
 		action := guardclient.EvaluateRequest{
 			TenantID:     tenantID,
@@ -80,6 +82,26 @@ func (e *Executor) EvaluateAndExpand(ctx context.Context, cmdName string, rawArg
 			// For now, we return an error. True HITL requires suspending execution.
 			return "", nil, fmt.Errorf("command requires HITL approval (not yet supported in CLI): %s", decision.Reason)
 		}
+	}
+
+	// Warden Action Guard (semantic safety via JSONL Beads) — Option B start
+	var args map[string]any
+	// rawArgs is []string in this context; put them under a generic key for policies
+	if len(rawArgs) > 0 {
+		args = map[string]any{"args": rawArgs}
+	}
+
+	if wdec := warden.CheckAction(ctx, &droverwarden.GuardRequest{
+		TenantID: tenantID,
+		ToolCall: &droverwarden.ToolCall{
+			ToolName: cmd.Name,
+			Args:     args,
+		},
+		Context: map[string]any{
+			"agent_id": agentID,
+		},
+	}); !wdec.Allowed {
+		return "", nil, fmt.Errorf("command blocked by Warden: %s", wdec.Result.Reason)
 	}
 
 	return prompt, &cmd, nil

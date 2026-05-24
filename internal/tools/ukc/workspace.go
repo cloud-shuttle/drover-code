@@ -35,15 +35,14 @@ var anywhereExcludes = []string{
 }
 
 func shouldExclude(relPath string) bool {
-	// Normalize path for matching
 	relPath = filepath.ToSlash(relPath)
-	
+
 	for _, ex := range rootExcludes {
 		if relPath == ex || strings.HasPrefix(relPath, ex+"/") {
 			return true
 		}
 	}
-	
+
 	for _, ex := range anywhereExcludes {
 		if relPath == ex || strings.HasPrefix(relPath, ex+"/") || strings.Contains(relPath, "/"+ex+"/") || strings.HasSuffix(relPath, "/"+ex) {
 			return true
@@ -54,12 +53,52 @@ func shouldExclude(relPath string) bool {
 
 // UploadWorkspace streams a tar.gz of the local directory to the UKC agent's /workspace endpoint.
 func UploadWorkspace(ctx context.Context, cfg Config, inst Instance, localDir string, agentToken string) error {
-	pr, pw := io.Pipe()
+	return UploadWorkspaceWithLimits(ctx, cfg, inst, localDir, agentToken, DefaultWorkspaceLimits())
+}
 
+// UploadWorkspaceWithLimits applies workspace exclusion and size caps before upload.
+func UploadWorkspaceWithLimits(ctx context.Context, cfg Config, inst Instance, localDir, agentToken string, limits WorkspaceLimits) error {
+	return UploadWorkspaceAt(ctx, cfg.HTTPClient, InstanceHTTPSURL(inst), agentToken, localDir, limits)
+}
+
+func uploadWorkspaceStream(ctx context.Context, client *http.Client, baseURL, agentToken string, body io.Reader) error {
+	url := strings.TrimRight(baseURL, "/") + "/workspace"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+agentToken)
+	req.Header.Set("Content-Type", "application/gzip")
+
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload workspace failed (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// UploadWorkspaceAt uploads localDir to the worker runtime at baseURL.
+func UploadWorkspaceAt(ctx context.Context, client *http.Client, baseURL, agentToken, localDir string, limits WorkspaceLimits) error {
+	limits = limits.normalize()
+	filter, err := newWorkspaceFilter(localDir)
+	if err != nil {
+		return err
+	}
+
+	pr, pw := io.Pipe()
 	go func() {
-		var err error
+		var walkErr error
 		defer func() {
-			pw.CloseWithError(err)
+			pw.CloseWithError(walkErr)
 		}()
 
 		gzw := gzip.NewWriter(pw)
@@ -67,7 +106,8 @@ func UploadWorkspace(ctx context.Context, cfg Config, inst Instance, localDir st
 		tw := tar.NewWriter(gzw)
 		defer tw.Close()
 
-		err = filepath.Walk(localDir, func(path string, info os.FileInfo, err error) error {
+		var totalBytes int64
+		walkErr = filepath.Walk(localDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -80,11 +120,21 @@ func UploadWorkspace(ctx context.Context, cfg Config, inst Instance, localDir st
 			}
 			relPath = filepath.ToSlash(relPath)
 
-			if shouldExclude(relPath) {
+			if filter.skipWalk(relPath, info) {
 				if info.IsDir() {
 					return filepath.SkipDir
 				}
 				return nil
+			}
+
+			if info.Mode().IsRegular() {
+				if info.Size() > limits.MaxFileBytes {
+					return fmt.Errorf("workspace exclusion: file %s exceeds max size (%d > %d bytes)", relPath, info.Size(), limits.MaxFileBytes)
+				}
+				totalBytes += info.Size()
+				if totalBytes > limits.MaxTotalBytes {
+					return fmt.Errorf("workspace exclusion: total payload exceeds max (%d > %d bytes)", totalBytes, limits.MaxTotalBytes)
+				}
 			}
 
 			var link string
@@ -118,41 +168,23 @@ func UploadWorkspace(ctx context.Context, cfg Config, inst Instance, localDir st
 		})
 	}()
 
-	url := InstanceHTTPSURL(inst) + "/workspace"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, pr)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+agentToken)
-	req.Header.Set("Content-Type", "application/gzip")
-
-	client := cfg.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("upload workspace failed (HTTP %d): %s", resp.StatusCode, string(body))
-	}
-	return nil
+	return uploadWorkspaceStream(ctx, client, baseURL, agentToken, pr)
 }
 
 // DownloadWorkspace fetches the modified workspace tar.gz and extracts it to destDir.
 func DownloadWorkspace(ctx context.Context, cfg Config, inst Instance, destDir string, agentToken string) error {
-	url := InstanceHTTPSURL(inst) + "/workspace"
+	return DownloadWorkspaceAt(ctx, cfg.HTTPClient, InstanceHTTPSURL(inst), agentToken, destDir)
+}
+
+// DownloadWorkspaceAt fetches the result payload from a worker runtime.
+func DownloadWorkspaceAt(ctx context.Context, client *http.Client, baseURL, agentToken, destDir string) error {
+	url := strings.TrimRight(baseURL, "/") + "/workspace"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+agentToken)
 
-	client := cfg.HTTPClient
 	if client == nil {
 		client = http.DefaultClient
 	}

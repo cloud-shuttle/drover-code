@@ -246,6 +246,52 @@ func DeleteInstance(ctx context.Context, cfg Config, uuid string) error {
 	return nil
 }
 
+// StopInstance requests Kraft Cloud to stop (power off) the given instance.
+// This is useful as a "force stop" step when normal DeleteInstance hangs because
+// some UKC instances can be stubborn while still running. The stop is best-effort;
+// caller should still attempt Delete afterward. Uses the same bulk payload shape
+// as delete, posted to the /stop action endpoint.
+func StopInstance(ctx context.Context, cfg Config, uuid string) error {
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = http.DefaultClient
+	}
+	payload := deleteInstancesBody{{UUID: uuid}}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.APIBaseURL, "/")+"/v1/instances/stop", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.Token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cfg.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode == 404 || resp.StatusCode == 410 {
+		// already gone or never existed — treat as success for cleanup purposes
+		return nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("ukc stop instance: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	var out deleteInstancesResponse
+	_ = json.Unmarshal(respBody, &out)
+	if out.Status != "" && out.Status != "success" {
+		// some errors are transient; surface but caller decides
+		return fmt.Errorf("ukc stop instance: status %q", out.Status)
+	}
+	return nil
+}
+
 // InstanceHTTPSURL returns a public HTTPS base URL for health and agent calls.
 func InstanceHTTPSURL(inst Instance) string {
 	// If the API returns the Service Group domain directly, use it!

@@ -14,9 +14,15 @@ import (
 	"time"
 )
 
+const (
+	maxStreamReplayEvents = 1000
+	streamReplayGrace     = 15 * time.Minute
+)
+
 type job struct {
 	id        string
 	mu        sync.Mutex
+	baseIndex int
 	history   []map[string]any
 	done      bool
 	listeners []chan struct{}
@@ -35,7 +41,7 @@ func (jr *jobRunner) start(parent context.Context, command string) string {
 	id := randomID()
 	j := &job{
 		id:        id,
-		history:   make([]map[string]any, 0),
+		history:   make([]map[string]any, 0, 64),
 		listeners: make([]chan struct{}, 0),
 	}
 	jr.mu.Lock()
@@ -53,8 +59,7 @@ func randomID() string {
 }
 
 func (jr *jobRunner) runCommand(parent context.Context, j *job, command string) {
-	// If nobody ever opens /exec/:id/stream, reclaim the map entry eventually.
-	time.AfterFunc(10*time.Minute, func() { jr.remove(j.id) })
+	defer j.scheduleRemoval(jr)
 
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -115,6 +120,10 @@ func (j *job) trySend(m map[string]any) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.history = append(j.history, m)
+	for len(j.history) > maxStreamReplayEvents {
+		j.history = j.history[1:]
+		j.baseIndex++
+	}
 	if done, _ := m["done"].(bool); done {
 		j.done = true
 	}
@@ -124,6 +133,10 @@ func (j *job) trySend(m map[string]any) {
 		default:
 		}
 	}
+}
+
+func (j *job) scheduleRemoval(jr *jobRunner) {
+	time.AfterFunc(streamReplayGrace, func() { jr.remove(j.id) })
 }
 
 func (j *job) subscribe() chan struct{} {
@@ -179,54 +192,83 @@ func (jr *jobRunner) streamSSE(w http.ResponseWriter, r *http.Request, jobID str
 		return fmt.Errorf("no flush")
 	}
 
-	startIndex := 0
-	lastIDStr := r.Header.Get("Last-Event-ID")
-	if lastIDStr != "" {
-		fmt.Sscanf(lastIDStr, "%d", &startIndex)
-		startIndex++
+	startIndex := -1
+	if lastIDStr := r.Header.Get("Last-Event-ID"); lastIDStr != "" {
+		var lastID int
+		fmt.Sscanf(lastIDStr, "%d", &lastID)
+		startIndex = lastID + 1
 	}
 
 	ch := j.subscribe()
 	defer j.unsubscribe(ch)
 
 	ctx := r.Context()
+	gapWarned := false
 	for {
 		j.mu.Lock()
+		base := j.baseIndex
 		avail := len(j.history)
 		j.mu.Unlock()
 
-		for startIndex < avail {
+		if startIndex < 0 {
+			startIndex = base
+		}
+		if startIndex < base && !gapWarned {
+			gapWarned = true
+			if err := writeSSE(w, fl, startIndex, map[string]any{
+				"stream": "stderr",
+				"line":   "stream replay gap: some earlier events were evicted from the worker buffer",
+			}); err != nil {
+				return err
+			}
+			startIndex = base
+		}
+
+		for idx := startIndex - base; idx >= 0 && idx < avail; idx++ {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 
 			j.mu.Lock()
-			ev := j.history[startIndex]
+			ev := j.history[idx]
+			eventID := j.baseIndex + idx
 			j.mu.Unlock()
 
-			line, err := json.Marshal(ev)
-			if err != nil {
+			if err := writeSSE(w, fl, eventID, ev); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(w, "id: %d\n", startIndex); err != nil {
-				return err
-			}
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
-				return err
-			}
-			fl.Flush()
-
 			if done, _ := ev["done"].(bool); done {
 				return nil
 			}
-			startIndex++
+			startIndex = eventID + 1
+		}
+
+		j.mu.Lock()
+		done := j.done
+		j.mu.Unlock()
+		if done {
+			return nil
 		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ch:
-			// more events available
 		}
 	}
+}
+
+func writeSSE(w http.ResponseWriter, fl http.Flusher, eventID int, ev map[string]any) error {
+	line, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "id: %d\n", eventID); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+		return err
+	}
+	fl.Flush()
+	return nil
 }

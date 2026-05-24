@@ -1,3 +1,16 @@
+---
+title: Architecture overview
+description: Module layout, execution modes, and integration points for the Drover Code agent engine.
+product: drover-code
+audience:
+  - evaluator
+  - platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Drover-Code Architecture Overview
 
 A visual guide to module relationships, data flow, and integration points.

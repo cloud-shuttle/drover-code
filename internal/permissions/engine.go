@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloudshuttle/drover-code/internal/warden"
 )
 
 type Mode int
@@ -82,6 +83,14 @@ func (e *Engine) Check(ctx context.Context, toolName string, input json.RawMessa
 	if mode == ModeBypass {
 		return tools.Allow, nil
 	}
+
+	// Warden participates in the permission decision (via CheckToolCall helper).
+	// This ensures one unified allow/deny (rules + semantic beads) for permitFn users.
+	// Warden deny is hard fail-closed, before any user prompt or persisted rule.
+	if wdec := warden.CheckToolCall(ctx, toolName, input); !wdec.Allowed {
+		return tools.Deny, nil
+	}
+
 	if mode == ModeAllowlist {
 		return e.checkAllowlist(toolName), nil
 	}
@@ -126,6 +135,13 @@ func (e *Engine) FastDecision(toolName string) (tools.Decision, bool) {
 	if mode == ModeBypass {
 		return tools.Allow, true
 	}
+
+	// Warden participates in FastDecision too (for plan-mode pre-approval and
+	// non-interactive paths). Uses background ctx (Warden only needs it for its internal spans).
+	if wdec := warden.CheckToolCall(context.Background(), toolName, nil); !wdec.Allowed {
+		return tools.Deny, true
+	}
+
 	if mode == ModeAllowlist {
 		return e.checkAllowlist(toolName), true
 	}

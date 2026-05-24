@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/cloudshuttle/drover-code/internal/integrations/sqlforge"
 	"strconv"
 	"strings"
 	"sync"
@@ -101,6 +103,9 @@ func (l *Loader) Load() error {
 
 	l.merged = merged // loadProjectMarkdown must not take l.mu: Load holds the write lock here.
 	l.systemInj = l.loadProjectMarkdown(merged)
+	if proj, ok := sqlforge.FindProject(l.workDir); ok {
+		l.systemInj += sqlforge.SystemPrompt(proj)
+	}
 	return nil
 }
 

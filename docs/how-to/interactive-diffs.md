@@ -1,3 +1,14 @@
+---
+title: Interactive diffs
+description: Design for reviewing and accepting agent-proposed file changes in the TUI.
+product: drover-code
+audience: platform-operator
+doc_type: how-to
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Interactive Diffs Design Document
 
 ## 1. Overview

@@ -192,3 +192,38 @@ func TestGitTools_CreateBranchEmptyName(t *testing.T) {
 		t.Fatal("expected error for empty branch name")
 	}
 }
+
+func TestCommit_HeadlessSkipsAutoReview(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+	t.Setenv("DROVER_CODE_HEADLESS", "1")
+	dir := t.TempDir()
+	ctx := context.Background()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(dir, "readme.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	commit := NewCommitTool(dir)
+	out, err := commit.Execute(ctx, mustJSON(t, map[string]any{"message": "add readme"}))
+	if err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Running quality review before commit") {
+		t.Fatalf("headless commit should skip auto review, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Successfully committed") {
+		t.Fatalf("expected success, got:\n%s", out)
+	}
+}

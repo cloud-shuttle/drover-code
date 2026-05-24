@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -208,9 +209,10 @@ func (t *Commit) Execute(ctx context.Context, rawInput json.RawMessage) (string,
 		return "", fmt.Errorf("git_commit: message cannot be empty")
 	}
 
-	// Default to auto review
-	if !strings.Contains(string(rawInput), `"auto_review": false`) {
-		inp.AutoReview = true
+	// Default to auto review in interactive mode; headless/hosted jobs skip the gate
+	// (execution clients perform result integration; quality review is often a no-op on knowledge repos).
+	if !strings.Contains(string(rawInput), `"auto_review"`) {
+		inp.AutoReview = !headlessExecution()
 	}
 
 	var report strings.Builder
@@ -398,5 +400,15 @@ func (t *CreateBranch) Execute(ctx context.Context, rawInput json.RawMessage) (s
 		args = append(args, inp.FromRef)
 	}
 	return runGit(ctx, t.WorkDir, args...)
+}
+
+func headlessExecution() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("DROVER_CODE_HEADLESS")))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 

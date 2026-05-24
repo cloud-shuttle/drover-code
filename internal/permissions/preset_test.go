@@ -7,7 +7,7 @@ import (
 
 func TestMergeUnikernelPreset_defaults(t *testing.T) {
 	allow, deny := MergeUnikernelPreset(nil, nil)
-	if !slices.Contains(allow, "read_file") || !slices.Contains(allow, "git_commit") {
+	if !slices.Contains(allow, "read_file") || !slices.Contains(allow, "git_commit") || !slices.Contains(allow, "review_my_changes") {
 		t.Fatalf("missing expected allows: %v", allow)
 	}
 	if slices.Contains(allow, "git_push") {
@@ -15,6 +15,14 @@ func TestMergeUnikernelPreset_defaults(t *testing.T) {
 	}
 	if !slices.Contains(deny, "git_push") {
 		t.Fatalf("expected git_push denied, got %v", deny)
+	}
+	for _, tool := range []string{"ukc_create", "ukc_exec", "ukc_delete", "ukc_delete_all", "ukc_list"} {
+		if slices.Contains(allow, tool) {
+			t.Fatalf("%s must not be allowlisted for sandbox agent jobs", tool)
+		}
+		if !slices.Contains(deny, tool) {
+			t.Fatalf("expected %s denied, got deny=%v", tool, deny)
+		}
 	}
 }
 

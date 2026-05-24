@@ -27,33 +27,68 @@ type Manager struct {
 	Templates *TemplatesCache
 }
 
+// MetroFromEnv returns the Kraftcloud metro/region from UKC_METRO or UKC_REGION.
+func MetroFromEnv() string {
+	return ResolveMetro(firstNonEmpty(
+		os.Getenv("UKC_METRO"),
+		os.Getenv("UKC_REGION"),
+	))
+}
+
+// ResolveMetro normalizes a Kraftcloud metro code (default fra).
+func ResolveMetro(metro string) string {
+	metro = strings.TrimSpace(metro)
+	if metro == "" {
+		return "fra"
+	}
+	return metro
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 // NewManagerFromEnv returns a Manager when UKC_TOKEN is set.
 func NewManagerFromEnv() (*Manager, bool, error) {
 	token := strings.TrimSpace(os.Getenv("UKC_TOKEN"))
 	if token == "" {
 		return nil, false, nil
 	}
-	metro := strings.TrimSpace(os.Getenv("UKC_METRO"))
-	if metro == "" {
-		metro = "fra"
+	mgr, err := NewManagerWithCredentials(token, MetroFromEnv(), strings.TrimSpace(os.Getenv("UKC_DEFAULT_AGENT_IMAGE")))
+	if err != nil {
+		return nil, false, err
 	}
-	image := strings.TrimSpace(os.Getenv("UKC_DEFAULT_AGENT_IMAGE"))
-	if image == "" {
+	return mgr, true, nil
+}
+
+// NewManagerWithCredentials builds a Manager for hosted execution clients.
+func NewManagerWithCredentials(token, metro, image string) (*Manager, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, fmt.Errorf("ukc: token required")
+	}
+	metro = ResolveMetro(metro)
+	if image = strings.TrimSpace(image); image == "" {
 		image = DefaultAgentImage
 	}
 	path, err := FilePath()
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	entries, err := loadRegistry(path)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	templatesPath := filepath.Join(filepath.Dir(path), "ukc-templates.json")
 	templatesCache, err := NewTemplatesCache(templatesPath)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to load templates cache: %w", err)
+		return nil, fmt.Errorf("failed to load templates cache: %w", err)
 	}
 
 	cfg := Config{
@@ -61,10 +96,10 @@ func NewManagerFromEnv() (*Manager, bool, error) {
 		Metro:         metro,
 		DefaultImage:  image,
 		APIBaseURL:    apiBaseForMetro(metro),
-		HTTPClient:    &http.Client{}, // per-call timeouts via context; streams may run until tool timeout
+		HTTPClient:    &http.Client{},
 		MaxHealthWait: 60 * time.Second,
 	}
-	return &Manager{regPath: path, entries: entries, cfg: cfg, Templates: templatesCache}, true, nil
+	return &Manager{regPath: path, entries: entries, cfg: cfg, Templates: templatesCache}, nil
 }
 
 func (m *Manager) persistLocked() error {

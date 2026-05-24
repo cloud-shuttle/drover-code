@@ -13,6 +13,10 @@ FROM --platform=linux/amd64 alpine:3.18
 RUN apk add --no-cache ca-certificates git openssh tzdata bash curl
 COPY --from=builder /ukc-agent /usr/local/bin/ukc-agent
 COPY --from=builder /drover-code /usr/local/bin/drover-code
+# Ship default safe Warden Beads for unikernel preset (Option B governance).
+# Cloud/UKC can override via DROVER_WARDEN_BEADS_DIR + volume mount for tenant-specific.
+RUN mkdir -p /usr/local/share/drover-code/beads
+COPY --from=builder /app/drover-code/beads/ /usr/local/share/drover-code/beads/
 EXPOSE 8080
 ENV PORT=8080
 ENTRYPOINT ["/usr/local/bin/ukc-agent"]

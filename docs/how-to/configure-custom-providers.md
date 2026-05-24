@@ -1,3 +1,14 @@
+---
+title: Configure custom LLM providers
+description: Point Drover Code at Anthropic-compatible API endpoints and provider configurations.
+product: drover-code
+audience: platform-operator
+doc_type: how-to
+topics:
+  - llm-routing
+surface: repo-docs
+---
+
 # Anthropic-compatible API providers
 
 drover-code speaks the **Anthropic Messages API**: `POST …/v1/messages`, Server-Sent Events, tool use in the same shape as Anthropic’s API. Any vendor that exposes that wire format can be used by pointing the client at their base URL and supplying their API key.

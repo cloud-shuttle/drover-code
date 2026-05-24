@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloudshuttle/drover-code/internal/warden"
 )
 
 func TestEngine_BypassAlwaysAllows(t *testing.T) {
@@ -124,6 +125,48 @@ func TestEngine_FastDecisionAllowlist(t *testing.T) {
 	d, ok = e.FastDecision("git_push")
 	if !ok || d != tools.Deny {
 		t.Fatalf("git_push: d=%v ok=%v", d, ok)
+	}
+}
+
+// TestEngine_WardenParticipates verifies that the new integration makes Warden
+// decisions part of the unified Engine.Check / FastDecision (and thus permitFn).
+// Uses a temp beads dir + ResetForTest to simulate an active semantic policy that
+// blocks a tool that would otherwise be allowed by the preset/config.
+func TestEngine_WardenParticipates(t *testing.T) {
+	warden.ResetForTest()
+
+	dir := t.TempDir()
+	// Policy that will cause a block for "bash" via the dangerous_args path.
+	pol := `{"id":"eng-001","type":"action","version":"1.0","scope":"mcp","rule":"test_engine_wd","tools":["bash"],"dangerous_args":["unit-test-block-bash"],"action":"block","severity":"critical"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "policies.jsonl"), []byte(pol), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	os.Setenv("DROVER_WARDEN_BEADS_DIR", dir)
+	defer os.Unsetenv("DROVER_WARDEN_BEADS_DIR")
+	_ = warden.Init() // ensure loaded (the wrapper's Get will also trigger)
+
+	// Unikernel-style allowlist that would normally permit "bash"
+	allow, deny := MergeUnikernelPreset(nil, nil)
+	e := NewEngine(ModeAllowlist, allow, deny, "", tools.AllowAll)
+
+	// FastDecision (no input args) falls back to static allowlist for this arg-dependent bead policy.
+	// (Warden still participates; arg-less Fast cannot see dangerous_args content.)
+	d, ok := e.FastDecision("bash")
+	if !ok || d != tools.Allow {
+		t.Fatalf("FastDecision(bash) arg-less: want Allow (list),true got %v,%v", d, ok)
+	}
+
+	// Full Check path (with input) exercises Warden participation -> hard Deny even though list allows it.
+	d, err := e.Check(context.Background(), "bash", json.RawMessage(`{"command":"unit-test-block-bash foo"}`))
+	if err != nil || d != tools.Deny {
+		t.Fatalf("Check(bash) with active blocking bead: want Deny, got %v err=%v", d, err)
+	}
+
+	// A non-blocked tool should still be allowed by the list + warden
+	d, err = e.Check(context.Background(), "read_file", json.RawMessage(`{}`))
+	if err != nil || d != tools.Allow {
+		t.Fatalf("read_file should still be allowed: %v err=%v", d, err)
 	}
 }
 

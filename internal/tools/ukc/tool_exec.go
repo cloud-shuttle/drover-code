@@ -1,11 +1,9 @@
 package ukc
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -37,10 +35,6 @@ type execInput struct {
 	TimeoutSec int    `json:"timeout_seconds"`
 }
 
-type execPostResp struct {
-	JobID string `json:"job_id"`
-}
-
 func (t *Exec) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if t.M == nil {
 		return "", fmt.Errorf("ukc_exec: manager not configured (set UKC_TOKEN)")
@@ -69,43 +63,17 @@ func (t *Exec) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(in.TimeoutSec)*time.Second)
 	defer cancel()
 
-	body, err := json.Marshal(map[string]string{"command": in.Command})
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(ent.URL, "/")+"/exec", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+ent.Token)
-	req.Header.Set("Content-Type", "application/json")
-
 	client := cfg.HTTPClient
 	if client == nil {
 		client = http.DefaultClient
 	}
-	resp, err := client.Do(req)
+
+	jobID, err := PostExecAt(ctx, client, ent.URL, ent.Token, in.Command)
 	if err != nil {
-		return "", err
-	}
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-	resp.Body.Close()
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("ukc_exec: POST /exec: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-	}
-	var post execPostResp
-	if err := json.Unmarshal(respBody, &post); err != nil {
-		return "", fmt.Errorf("ukc_exec: bad JSON from agent: %w", err)
-	}
-	post.JobID = strings.TrimSpace(post.JobID)
-	if post.JobID == "" {
-		return "", fmt.Errorf("ukc_exec: missing job_id")
+		return "", fmt.Errorf("ukc_exec: %w", err)
 	}
 
-	streamURL := strings.TrimRight(ent.URL, "/") + "/exec/" + post.JobID + "/stream"
+	streamURL := ExecStreamURL(ent.URL, jobID)
 	out, code, err := ReadExecStream(ctx, client, streamURL, ent.Token, nil)
 	if err != nil {
 		return "", err
