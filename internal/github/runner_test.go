@@ -158,13 +158,13 @@ func TestRunner_run_localRepoMockAPI(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(origin, "README.md"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(origin, ".claude"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(origin, ".drover"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(origin, ".claude", "settings.json"), []byte(`{"contextLimitEstimate":50000,"disableAutoCompaction":true}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(origin, ".drover", "settings.json"), []byte(`{"contextLimitEstimate":50000,"disableAutoCompaction":true}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, origin, "add", "README.md", ".claude/settings.json")
+	runGit(t, origin, "add", "README.md", ".drover/settings.json")
 	runGit(t, origin, "commit", "-m", "init")
 	runGit(t, origin, "branch", "-M", "main")
 

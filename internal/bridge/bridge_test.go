@@ -176,6 +176,20 @@ func TestBridge_readMessage_badJSONBody(t *testing.T) {
 	}
 }
 
+func TestBridge_readMessage_oversizedBody(t *testing.T) {
+	// Requesting an allocation larger than 32 MiB without actually sending that much data.
+	in := "Content-Length: 33554433\r\n\r\n"
+	var out bytes.Buffer
+	b := NewBridge(strings.NewReader(in), &out)
+	_, err := b.readMessage(context.Background())
+	if err == nil {
+		t.Fatal("expected error for oversized body")
+	}
+	if !strings.Contains(err.Error(), "exceeds 32MiB limit") {
+		t.Fatalf("expected 32MiB limit error, got: %v", err)
+	}
+}
+
 func TestBridge_readMessageParsesFramedJSON(t *testing.T) {
 	msg := `{"jsonrpc":"2.0","id":1,"method":"ping","params":{"a":1}}`
 	in := "Content-Length: " + itoa(len([]byte(msg))) + "\r\n\r\n" + msg

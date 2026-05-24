@@ -56,7 +56,7 @@ func TestOpenStore_sqliteEnv(t *testing.T) {
 	if err := s.Save(Entry{ID: "x", Timestamp: time.Now().UTC(), Content: "hello"}); err != nil {
 		t.Fatal(err)
 	}
-	dbPath := filepath.Join(dir, ".claude", "memory.db")
+	dbPath := filepath.Join(dir, ".drover", "memory.db")
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("expected sqlite file: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestOpenStore_migratesJSONWhenSQLiteEmpty(t *testing.T) {
 	t.Setenv("DROVER_CODE_DREAM_BACKEND", "sqlite")
 	t.Setenv("DROVER_CODE_DREAM_SKIP_JSON_IMPORT", "")
 	dir := t.TempDir()
-	claudeDir := filepath.Join(dir, ".claude")
+	claudeDir := filepath.Join(dir, ".drover")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestOpenStore_skipsImportWhenEnvSet(t *testing.T) {
 	t.Setenv("DROVER_CODE_DREAM_BACKEND", "sqlite")
 	t.Setenv("DROVER_CODE_DREAM_SKIP_JSON_IMPORT", "1")
 	dir := t.TempDir()
-	claudeDir := filepath.Join(dir, ".claude")
+	claudeDir := filepath.Join(dir, ".drover")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

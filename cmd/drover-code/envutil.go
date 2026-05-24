@@ -32,20 +32,28 @@ func envIntPositive(key string) int {
 	return n
 }
 
-// anthropicAPIKey returns the first non-empty of ANTHROPIC_API_KEY or
-// ANTHROPIC_AUTH_TOKEN (Moonshot/Kimi and some other shims use the latter).
+// anthropicAPIKey returns the first non-empty API key from the environment.
+// It checks Anthropic, Gemini, and OpenAI keys to support API gateways.
 func anthropicAPIKey() string {
-	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
-		return v
+	keys := []string{
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_AUTH_TOKEN",
+		"GEMINI_API_KEY",
+		"OPENAI_API_KEY",
 	}
-	return strings.TrimSpace(os.Getenv("ANTHROPIC_AUTH_TOKEN"))
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func requireAnthropicAPIKey() string {
 	if k := anthropicAPIKey(); k != "" {
 		return k
 	}
-	fmt.Fprintln(os.Stderr, "error: set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN")
+	fmt.Fprintln(os.Stderr, "error: set ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY")
 	os.Exit(2)
 	return ""
 }

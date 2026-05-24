@@ -17,12 +17,7 @@ Official Anthropic needs only `ANTHROPIC_API_KEY` (default base URL is `https://
 
 ## Environment variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | One of key vars | Primary API key (Anthropic `sk-ant-…` or a provider key). |
-| `ANTHROPIC_AUTH_TOKEN` | One of key vars | Alternative key name; **if `ANTHROPIC_API_KEY` is empty, this is used** (e.g. Moonshot/Kimi docs). |
-| `ANTHROPIC_BASE_URL` | For gateways | Overrides the API host. Requests go to `{BASE_URL}/v1/messages` (no trailing slash required). |
-| `ANTHROPIC_MODEL` | Optional | Model id for the provider (also configurable via `.claude/settings.json` `"model"`). |
+To configure custom endpoints, you will need to set the appropriate environment variables. For a complete list of accepted variables (such as `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`), please refer to the [Environment Variables Reference](../reference/environment-variables.md).
 
 At least one of `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` must be non-empty.
 

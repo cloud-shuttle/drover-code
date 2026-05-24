@@ -1,4 +1,4 @@
-package ukc
+package workspace
 
 import (
 	"fmt"
@@ -14,21 +14,61 @@ const (
 	DefaultMaxTotalBytes = 500 * 1024 * 1024 // 500 MiB
 )
 
-// WorkspaceLimits caps workspace payload size (ADR 0003 / workspace exclusion).
-type WorkspaceLimits struct {
+var rootExcludes = []string{
+	"drover-local",
+	"drover-code",
+	"claude-go",
+	"ukc-agent",
+	"cmd/ukc-agent/ukc-agent",
+	"bin",
+	"unikraft",
+}
+
+var anywhereExcludes = []string{
+	".git",
+	"node_modules",
+	"dist",
+	"target",
+	"__pycache__",
+	".venv",
+	"venv",
+	".unikraft",
+	".drover-code-workers",
+}
+
+// ShouldExclude returns true if the relative path matches hardcoded global exclusions.
+func ShouldExclude(relPath string) bool {
+	relPath = filepath.ToSlash(relPath)
+
+	for _, ex := range rootExcludes {
+		if relPath == ex || strings.HasPrefix(relPath, ex+"/") {
+			return true
+		}
+	}
+
+	for _, ex := range anywhereExcludes {
+		if relPath == ex || strings.HasPrefix(relPath, ex+"/") || strings.Contains(relPath, "/"+ex+"/") || strings.HasSuffix(relPath, "/"+ex) {
+			return true
+		}
+	}
+	return false
+}
+
+// Limits caps workspace payload size (ADR 0003 / workspace exclusion).
+type Limits struct {
 	MaxFileBytes  int64
 	MaxTotalBytes int64
 }
 
-// DefaultWorkspaceLimits returns ADR defaults when fields are zero.
-func DefaultWorkspaceLimits() WorkspaceLimits {
-	return WorkspaceLimits{
+// DefaultLimits returns ADR defaults when fields are zero.
+func DefaultLimits() Limits {
+	return Limits{
 		MaxFileBytes:  DefaultMaxFileBytes,
 		MaxTotalBytes: DefaultMaxTotalBytes,
 	}
 }
 
-func (l WorkspaceLimits) normalize() WorkspaceLimits {
+func (l Limits) normalize() Limits {
 	if l.MaxFileBytes <= 0 {
 		l.MaxFileBytes = DefaultMaxFileBytes
 	}
@@ -44,11 +84,11 @@ type UploadSummary struct {
 	TotalBytes int64
 }
 
-// PlanWorkspaceUpload walks localDir and returns file count and total bytes that
+// PlanUpload walks localDir and returns file count and total bytes that
 // would be included after workspace exclusion rules.
-func PlanWorkspaceUpload(localDir string, limits WorkspaceLimits) (UploadSummary, error) {
+func PlanUpload(localDir string, limits Limits) (UploadSummary, error) {
 	limits = limits.normalize()
-	filter, err := newWorkspaceFilter(localDir)
+	filter, err := NewFilter(localDir)
 	if err != nil {
 		return UploadSummary{}, err
 	}
@@ -67,7 +107,7 @@ func PlanWorkspaceUpload(localDir string, limits WorkspaceLimits) (UploadSummary
 		}
 		relPath = filepath.ToSlash(relPath)
 
-		if filter.skipWalk(relPath, info) {
+		if filter.SkipWalk(relPath, info) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -90,13 +130,14 @@ func PlanWorkspaceUpload(localDir string, limits WorkspaceLimits) (UploadSummary
 	return summary, err
 }
 
-type workspaceFilter struct {
+type Filter struct {
 	root     string
 	matchers []*gitignore.GitIgnore
 }
 
-func newWorkspaceFilter(root string) (*workspaceFilter, error) {
-	f := &workspaceFilter{root: root}
+// NewFilter creates a workspace filter that respects .gitignore, .droverignore, and secret exclusions.
+func NewFilter(root string) (*Filter, error) {
+	f := &Filter{root: root}
 	for _, name := range []string{".gitignore", ".droverignore"} {
 		path := filepath.Join(root, name)
 		m, err := gitignore.CompileIgnoreFile(path)
@@ -111,8 +152,9 @@ func newWorkspaceFilter(root string) (*workspaceFilter, error) {
 	return f, nil
 }
 
-func (f *workspaceFilter) skipWalk(relPath string, info os.FileInfo) bool {
-	if shouldExclude(relPath) {
+// SkipWalk returns true if the file should be excluded from the workspace payload.
+func (f *Filter) SkipWalk(relPath string, info os.FileInfo) bool {
+	if ShouldExclude(relPath) {
 		return true
 	}
 	if isSecretPath(relPath) {

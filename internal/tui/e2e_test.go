@@ -31,8 +31,8 @@ func TestE2E_StartupAndExit(t *testing.T) {
 	// 2. Setup the test command
 	cmd := exec.Command(binPath)
 	cmd.Dir = tmpDir
-	// Required to bypass "API key not found" errors
-	cmd.Env = append(os.Environ(), "ANTHROPIC_API_KEY=sk-ant-api03-test-1234")
+	// Required to bypass "API key not found" errors and terminal color checks
+	cmd.Env = append(os.Environ(), "ANTHROPIC_API_KEY=sk-ant-api03-test-1234", "LIPGLOSS_HAS_DARK_BACKGROUND=1", "TERM=dumb")
 
 	// 3. Start inside a PTY
 	ptmx, err := pty.Start(cmd)
@@ -117,7 +117,7 @@ func TestE2E_TypingInteraction(t *testing.T) {
 
 	cmd := exec.Command(binPath)
 	cmd.Dir = tmpDir
-	cmd.Env = append(os.Environ(), "ANTHROPIC_API_KEY=sk-ant-api03-test-1234")
+	cmd.Env = append(os.Environ(), "ANTHROPIC_API_KEY=sk-ant-api03-test-1234", "LIPGLOSS_HAS_DARK_BACKGROUND=1", "TERM=dumb")
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {

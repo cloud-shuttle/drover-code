@@ -773,7 +773,7 @@ func (m *Model) tokensInfoText() string {
 
 func (m *Model) modelInfoText() string {
 	return strings.TrimSpace(fmt.Sprintf(
-		"(/model) Active model: %s\nTo change it, set ANTHROPIC_MODEL or \"model\" in .claude/settings.json and restart.",
+		"(/model) Active model: %s\nTo change it, set ANTHROPIC_MODEL or \"model\" in .drover/settings.json and restart.",
 		m.modelName,
 	))
 }

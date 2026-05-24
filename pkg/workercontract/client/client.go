@@ -1,13 +1,13 @@
-package workerclient
+package client
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
+	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
 )
 
 // Client talks to a worker runtime over the shared worker contract HTTP API.
@@ -35,7 +35,7 @@ func (c *Client) WaitReady(ctx context.Context, maxWait time.Duration) error {
 }
 
 // UploadWorkspace sends a tar.gz workspace payload built from localDir.
-func (c *Client) UploadWorkspace(ctx context.Context, localDir string, limits ukc.WorkspaceLimits) error {
+func (c *Client) UploadWorkspace(ctx context.Context, localDir string, limits workspace.Limits) error {
 	return ukc.UploadWorkspaceAt(ctx, c.HTTP, c.BaseURL, c.Token, localDir, limits)
 }
 
@@ -52,51 +52,4 @@ func (c *Client) Exec(ctx context.Context, command string, onLine func(string)) 
 // DownloadWorkspace fetches the result payload and extracts it to destDir.
 func (c *Client) DownloadWorkspace(ctx context.Context, destDir string) error {
 	return ukc.DownloadWorkspaceAt(ctx, c.HTTP, c.BaseURL, c.Token, destDir)
-}
-
-// ContractSpec describes one worker-contract execution (upload → exec → download).
-type ContractSpec struct {
-	WorkDir      string
-	DownloadDir  string
-	Command      string
-	Limits       ukc.WorkspaceLimits
-	OnStreamLine func(string)
-	MaxHealthWait time.Duration
-}
-
-// ContractResult is the outcome of a worker contract run.
-type ContractResult struct {
-	Output   string
-	ExitCode int
-}
-
-// RunContract executes upload → exec → optional download against the worker runtime.
-func RunContract(ctx context.Context, c *Client, spec ContractSpec) (ContractResult, error) {
-	if spec.Limits == (ukc.WorkspaceLimits{}) {
-		spec.Limits = ukc.DefaultWorkspaceLimits()
-	}
-	maxWait := spec.MaxHealthWait
-	if maxWait == 0 {
-		maxWait = 60 * time.Second
-	}
-
-	if err := c.WaitReady(ctx, maxWait); err != nil {
-		return ContractResult{}, err
-	}
-	if err := c.UploadWorkspace(ctx, spec.WorkDir, spec.Limits); err != nil {
-		return ContractResult{}, fmt.Errorf("upload workspace: %w", err)
-	}
-	out, code, err := c.Exec(ctx, spec.Command, spec.OnStreamLine)
-	if err != nil {
-		return ContractResult{Output: out, ExitCode: code}, err
-	}
-	if code != 0 {
-		return ContractResult{Output: out, ExitCode: code}, fmt.Errorf("worker exec exit %d", code)
-	}
-	if spec.DownloadDir != "" {
-		if err := c.DownloadWorkspace(ctx, spec.DownloadDir); err != nil {
-			return ContractResult{Output: out, ExitCode: code}, fmt.Errorf("download workspace: %w", err)
-		}
-	}
-	return ContractResult{Output: out, ExitCode: code}, nil
 }
