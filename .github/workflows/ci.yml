@@ -15,15 +15,45 @@ jobs:
           go-version: "1.22"
       - name: Test (Unit, Snapshot, and E2E)
         env:
-          CGO_ENABLED: "0"
           TERM: xterm-256color
         run: |
-          go test -v -coverprofile=coverage.out ./...
+          go test -race -count=1 -v -coverprofile=coverage.out -covermode=atomic ./...
           go tool cover -func=coverage.out | grep total
       - name: Build
         env:
           CGO_ENABLED: "0"
         run: go build -o /tmp/drover-code ./cmd/drover-code
+      - name: Upload coverage artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.run_id }}
+          path: coverage.out
+          retention-days: 7
+
+  quality-gate:
+    name: Quality Gate (CRAP)
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download coverage artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-${{ github.run_id }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run quality gate
+        run: |
+          python3 scripts/quality-gate.py . \
+            --coverage coverage.out \
+            --limit 10000
 
   fuzz:
     runs-on: ubuntu-latest
