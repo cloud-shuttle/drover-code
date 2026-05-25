@@ -8,13 +8,31 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
+type threadSafeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *threadSafeBuffer) Write(p []byte) (n int, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *threadSafeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 func TestBridge_SendFramesWithCorrectLength(t *testing.T) {
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(strings.NewReader(""), &out)
 
 	id := int64(1)
@@ -45,7 +63,7 @@ func TestBridge_SendFramesWithCorrectLength(t *testing.T) {
 
 func TestBridge_readMessage_missingContentLength(t *testing.T) {
 	in := "\r\n"
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(strings.NewReader(in), &out)
 	_, err := b.readMessage(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "Content-Length") {
@@ -58,7 +76,7 @@ func TestBridge_Run_ReturnsContextCanceled(t *testing.T) {
 	cancel()
 	pr, pw := io.Pipe()
 	defer func() { _ = pw.Close() }()
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	err := b.Run(ctx)
 	if !errors.Is(err, context.Canceled) {
@@ -71,7 +89,7 @@ func TestBridge_Run_ReturnsDeadlineExceeded(t *testing.T) {
 	defer cancel()
 	pr, pw := io.Pipe()
 	defer func() { _ = pw.Close() }()
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	err := b.Run(ctx)
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -83,7 +101,7 @@ func TestBridge_Run_ContextCanceledWhileBlockedOnRead(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer func() { _ = pw.Close() }()
 
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -107,7 +125,7 @@ func TestBridge_Run_ReturnsNilWhenWriterClosedWhileBlocked(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer pr.Close()
 
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	done := make(chan error, 1)
 	go func() { done <- b.Run(context.Background()) }()
@@ -130,7 +148,7 @@ func TestBridge_Run_ErrorWhenWriterClosedMidBody(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer pr.Close()
 
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	done := make(chan error, 1)
 	go func() { done <- b.Run(context.Background()) }()
@@ -154,7 +172,7 @@ func TestBridge_Run_ErrorWhenWriterClosedMidBody(t *testing.T) {
 
 func TestBridge_readMessage_contentLengthLongerThanBody(t *testing.T) {
 	in := "Content-Length: 50\r\n\r\nab"
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(strings.NewReader(in), &out)
 	_, err := b.readMessage(context.Background())
 	if err == nil {
@@ -168,7 +186,7 @@ func TestBridge_readMessage_contentLengthLongerThanBody(t *testing.T) {
 func TestBridge_readMessage_badJSONBody(t *testing.T) {
 	msg := `not-json`
 	in := "Content-Length: " + itoa(len(msg)) + "\r\n\r\n" + msg
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(strings.NewReader(in), &out)
 	_, err := b.readMessage(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "parse") {
@@ -180,7 +198,7 @@ func TestBridge_readMessageParsesFramedJSON(t *testing.T) {
 	msg := `{"jsonrpc":"2.0","id":1,"method":"ping","params":{"a":1}}`
 	in := "Content-Length: " + itoa(len([]byte(msg))) + "\r\n\r\n" + msg
 
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(strings.NewReader(in), &out)
 
 	got, err := b.readMessage(context.Background())
@@ -243,7 +261,7 @@ func TestBridge_Run_unknownMethodSendsError(t *testing.T) {
 	msg := `{"jsonrpc":"2.0","id":7,"method":"no_such_method","params":{}}`
 	in := "Content-Length: " + itoa(len([]byte(msg))) + "\r\n\r\n" + msg
 
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(strings.NewReader(in), &out)
 	if err := b.Run(context.Background()); err != nil {
 		t.Fatal(err)
@@ -256,7 +274,7 @@ func TestBridge_Run_unknownMethodSendsError(t *testing.T) {
 
 func TestBridge_Run_pingHandler(t *testing.T) {
 	pr, pw := io.Pipe()
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	RegisterStandardHandlers(b, func(ctx context.Context, input string) (string, error) {
 		return "", fmt.Errorf("agent should not run for ping")
@@ -288,7 +306,7 @@ func TestBridge_Run_pingHandler(t *testing.T) {
 
 func TestRegisterStandardHandlers_droverExecute(t *testing.T) {
 	pr, pw := io.Pipe()
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	RegisterStandardHandlers(b, func(ctx context.Context, input string) (string, error) {
 		return "echo:" + input, nil
@@ -320,7 +338,7 @@ func TestRegisterStandardHandlers_droverExecute(t *testing.T) {
 
 func TestRegisterStandardHandlers_initializeThenExecute(t *testing.T) {
 	pr, pw := io.Pipe()
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	RegisterStandardHandlers(b, func(ctx context.Context, input string) (string, error) {
 		return "echo:" + input, nil
@@ -366,7 +384,7 @@ func TestRegisterStandardHandlers_initializeThenExecute(t *testing.T) {
 
 func TestRegisterStandardHandlers_threeSequentialExecutes(t *testing.T) {
 	pr, pw := io.Pipe()
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	var calls atomic.Int32
 	RegisterStandardHandlers(b, func(ctx context.Context, input string) (string, error) {
@@ -410,7 +428,7 @@ func TestRegisterStandardHandlers_threeSequentialExecutes(t *testing.T) {
 
 func TestRegisterStandardHandlers_droverExecuteInvalidParams(t *testing.T) {
 	pr, pw := io.Pipe()
-	var out bytes.Buffer
+	var out threadSafeBuffer
 	b := NewBridge(pr, &out)
 	RegisterStandardHandlers(b, func(ctx context.Context, input string) (string, error) {
 		t.Error("agent should not run")

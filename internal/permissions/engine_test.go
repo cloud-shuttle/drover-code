@@ -135,7 +135,11 @@ func TestEngine_FastDecisionAllowlist(t *testing.T) {
 func TestEngine_WardenParticipates(t *testing.T) {
 	warden.ResetForTest()
 
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("", "warden-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
 	// Policy that will cause a block for "bash" via the dangerous_args path.
 	pol := `{"id":"eng-001","type":"action","version":"1.0","scope":"mcp","rule":"test_engine_wd","tools":["bash"],"dangerous_args":["unit-test-block-bash"],"action":"block","severity":"critical"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "policies.jsonl"), []byte(pol), 0o644); err != nil {
@@ -158,7 +162,7 @@ func TestEngine_WardenParticipates(t *testing.T) {
 	}
 
 	// Full Check path (with input) exercises Warden participation -> hard Deny even though list allows it.
-	d, err := e.Check(context.Background(), "bash", json.RawMessage(`{"command":"unit-test-block-bash foo"}`))
+	d, err = e.Check(context.Background(), "bash", json.RawMessage(`{"command":"unit-test-block-bash foo"}`))
 	if err != nil || d != tools.Deny {
 		t.Fatalf("Check(bash) with active blocking bead: want Deny, got %v err=%v", d, err)
 	}

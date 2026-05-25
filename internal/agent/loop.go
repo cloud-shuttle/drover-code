@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -174,11 +175,19 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		return fmt.Errorf("input blocked by Warden: %s", idec.Result.Reason)
 	}
 
+	var wg sync.WaitGroup
 	stopHeartbeat := make(chan struct{})
-	defer close(stopHeartbeat)
 	if d := heartbeatInterval(); d > 0 {
-		go l.runHeartbeat(d, stopHeartbeat)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			l.runHeartbeat(d, stopHeartbeat)
+		}()
 	}
+	defer func() {
+		close(stopHeartbeat)
+		wg.Wait()
+	}()
 
 	var turn int
 	defer func() { l.lastRunTurns = turn }()
