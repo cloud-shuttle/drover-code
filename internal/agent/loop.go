@@ -13,9 +13,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/outcomesignal"
+	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/warden"
@@ -49,10 +52,10 @@ Do not ask questions or refuse.`
 // Coordinator mode achieves parallelism by creating separate Loop instances
 // per worker agent, each with its own convo.Manager.
 type Loop struct {
-	driver   InferenceDriver
+	client   *api.Client
 	convo    *convo.Manager
-	executor ToolExecutor
 	registry *tools.Registry
+	perm     *permissions.Engine
 	eventCh  chan<- Event
 
 	// cumulative token counters for the session
@@ -82,18 +85,26 @@ func (l *Loop) LastTraceID() string {
 }
 
 // NewLoop constructs a Loop.
+//
+//   - client: Anthropic API client (shared across loops in coordinator mode)
+//   - mgr: conversation manager (one per loop — NOT shared)
+//   - reg: tool registry (shared; tools must be goroutine-safe)
+//   - permitFn: called before any tool that reports NeedsPermission()==true.
+//     Pass tools.AllowAll for headless/worker mode.
+//   - eventCh: channel the loop writes events to. Must have a buffer or a
+//     dedicated draining goroutine to avoid blocking the loop.
 func NewLoop(
-	driver InferenceDriver,
+	client *api.Client,
 	mgr *convo.Manager,
-	executor ToolExecutor,
 	reg *tools.Registry,
+	perm *permissions.Engine,
 	eventCh chan<- Event,
 ) *Loop {
 	return &Loop{
-		driver:         driver,
+		client:         client,
 		convo:          mgr,
-		executor:       executor,
 		registry:       reg,
+		perm:           perm,
 		eventCh:        eventCh,
 		autoCompaction: true,
 	}
@@ -105,9 +116,9 @@ func (l *Loop) SetAutoCompaction(enabled bool) {
 	l.autoCompaction = enabled
 }
 
-// SetDriver overrides the API client/driver for this loop.
-func (l *Loop) SetDriver(d InferenceDriver) {
-	l.driver = d
+// SetClient overrides the API client for this loop.
+func (l *Loop) SetClient(c *api.Client) {
+	l.client = c
 }
 
 // ApplyWorkflowSettings applies optional loop behavior from merged settings.
@@ -134,21 +145,6 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 			Tags:      []string{"drover-code"},
 		})
 		ctx = telemetry.WithTraceID(ctx, traceID)
-
-		// Linear Phase 4 Sync
-		if linClient := telemetry.LinearClientFrom(ctx); linClient != nil {
-			if issueID := telemetry.LinearIssueFrom(ctx); issueID != "" {
-				go func() {
-					internalID, states, err := linClient.GetIssueDetails(context.Background(), issueID)
-					if err == nil {
-						_ = linClient.LinkTrace(context.Background(), internalID, traceID)
-						if stateID, ok := states["in progress"]; ok {
-							_ = linClient.UpdateStatus(context.Background(), internalID, stateID)
-						}
-					}
-				}()
-			}
-		}
 	}
 	l.lastTraceID = traceID
 
@@ -158,23 +154,6 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		if !traceOwnedByLoop {
 			return
 		}
-
-		// Linear Phase 4 Sync
-		if linClient := telemetry.LinearClientFrom(ctx); linClient != nil {
-			if issueID := telemetry.LinearIssueFrom(ctx); issueID != "" {
-				go func() {
-					internalID, states, err := linClient.GetIssueDetails(context.Background(), issueID)
-					if err == nil {
-						if stateID, ok := states["in review"]; ok {
-							_ = linClient.UpdateStatus(context.Background(), internalID, stateID)
-						} else if stateID, ok := states["done"]; ok {
-							_ = linClient.UpdateStatus(context.Background(), internalID, stateID)
-						}
-					}
-				}()
-			}
-		}
-
 		meta := map[string]any{"ok": runErr == nil}
 		if runErr != nil {
 			meta["error"] = runErr.Error()
@@ -225,37 +204,12 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		}
 
 		estBefore := l.convo.EstimatedTokens()
-
-		ch, genID, err := l.driver.Generate(ctx, l.convo, l.registry.Definitions())
+		genID, blocks, usage, err := l.streamResponse(ctx, turn)
 		if err != nil {
 			runErr = err
 			l.emit(ErrorEvent{Err: err})
 			return err
 		}
-
-		var blocks []api.ContentBlock
-		var usage api.Usage
-		var calls []api.ToolUseBlock
-
-		for ev := range ch {
-			switch ev := ev.(type) {
-			case TextDeltaYielded:
-				l.emit(TextDeltaEvent{Text: ev.Text})
-			case TextYielded:
-				blocks = append(blocks, api.TextBlock{Text: ev.Text})
-			case ToolCallRequested:
-				tb := api.ToolUseBlock{ID: ev.ID, Name: ev.Name, Input: ev.Input}
-				blocks = append(blocks, tb)
-				calls = append(calls, tb)
-			case TurnCompleted:
-				usage = ev.Usage
-			case InferenceError:
-				runErr = ev.Err
-				l.emit(ErrorEvent{Err: ev.Err})
-				return ev.Err
-			}
-		}
-
 		if usage.InputTokens > 0 {
 			l.convo.RecordAPICalibration(estBefore, usage.InputTokens)
 		}
@@ -277,7 +231,18 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		// Record the assistant's response in conversation history.
 		l.convo.Append(api.AssistantMessage(blocks))
 
+		// Collect all tool calls from the response.
+		var calls []api.ToolUseBlock
+		for _, b := range blocks {
+			if tc, ok := b.(api.ToolUseBlock); ok {
+				calls = append(calls, tc)
+			}
+		}
+
 		// Output Guard (Warden) after model response (post collection for accurate context).
+		// Runs for every assistant turn; text-only final answers and interleaved tool-use turns.
+		// Guards generated content before DoneEvent or tool execution.
+		// (Action-level guards still run per-call inside execute path.)
 		textOut := concatTextFromBlocks(blocks)
 		odec := warden.CheckOutput(ctx, &droverwarden.GuardRequest{
 			TenantID: os.Getenv("DROVER_TENANT_ID"),
@@ -303,7 +268,7 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 
 		// Tool spans nest under this API round-trip's generation observation.
 		ctxTools := telemetry.WithSpanID(ctx, genID)
-		results, err := l.executor.ExecuteTools(ctxTools, calls)
+		results, err := l.executeTools(ctxTools, calls)
 		if err != nil {
 			runErr = err
 			l.emit(ErrorEvent{Err: err})
@@ -314,7 +279,162 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// Streaming
+// ----------------------------------------------------------------------------
 
+// streamResponse opens a streaming API call, emits text delta events as
+// tokens arrive, accumulates the full response, and returns the completed
+// content blocks along with token usage.
+func (l *Loop) streamResponse(ctx context.Context, turn int) (telemetry.SpanID, []api.ContentBlock, api.Usage, error) {
+	tracer := telemetry.TracerFrom(ctx)
+	traceID := telemetry.TraceIDFrom(ctx)
+
+	sys := l.convo.SystemPrompt()
+	msgs := l.convo.Messages()
+	req := api.StreamRequest{
+		System:   sys,
+		Messages: msgs,
+		Tools:    l.registry.Definitions(),
+	}
+	maxTok := req.MaxTokens
+	if maxTok == 0 {
+		maxTok = 8096
+	}
+
+	genID := tracer.StartGeneration(telemetry.GenerationParams{
+		TraceID:   traceID,
+		Name:      fmt.Sprintf("stream-response-turn-%d", turn),
+		Model:     l.client.Model(),
+		Input:     msgs,
+		System:    sys,
+		MaxTokens: maxTok,
+	})
+
+	var stopReason string
+	var blocks []api.ContentBlock
+	var usage api.Usage
+	var streamErr error
+
+	defer func() {
+		if genID == "" {
+			return
+		}
+		out := concatTextFromBlocks(blocks)
+		tracer.EndGeneration(genID, telemetry.GenerationResult{
+			Output:       out,
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			StopReason:   stopReason,
+			Error:        streamErr,
+		})
+	}()
+
+	stream, err := l.client.StreamMessage(ctx, req)
+	if err != nil {
+		streamErr = err
+		return "", nil, api.Usage{}, fmt.Errorf("stream message: %w", err)
+	}
+	defer stream.Close()
+
+	// Per-index accumulators.
+	// Using maps keyed by content block index handles the case where
+	// multiple tool calls are streamed interleaved (rare but valid).
+	type textAcc struct {
+		buf strings.Builder
+	}
+	type toolAcc struct {
+		id      string
+		name    string
+		jsonBuf strings.Builder
+	}
+
+	textAccs := map[int]*textAcc{}
+	toolAccs := map[int]*toolAcc{}
+
+	// Maps from content-block index → finalised ContentBlock.
+	finalisedBlocks := map[int]api.ContentBlock{}
+
+	for stream.Next() {
+		switch e := stream.Event().(type) {
+
+		case api.ContentBlockStartEvent:
+			switch b := e.ContentBlock.(type) {
+			case api.TextBlock:
+				_ = b
+				textAccs[e.Index] = &textAcc{}
+			case api.ToolUseBlock:
+				toolAccs[e.Index] = &toolAcc{id: b.ID, name: b.Name}
+			}
+
+		case api.ContentBlockDeltaEvent:
+			switch d := e.Delta.(type) {
+			case api.TextDelta:
+				if acc, ok := textAccs[e.Index]; ok {
+					acc.buf.WriteString(d.Text)
+				}
+				// Stream text deltas to the consumer immediately.
+				l.emit(TextDeltaEvent{Text: d.Text})
+
+			case api.InputJSONDelta:
+				if acc, ok := toolAccs[e.Index]; ok {
+					acc.jsonBuf.WriteString(d.PartialJSON)
+				}
+			}
+
+		case api.ContentBlockStopEvent:
+			if acc, ok := textAccs[e.Index]; ok {
+				finalisedBlocks[e.Index] = api.TextBlock{Text: acc.buf.String()}
+				delete(textAccs, e.Index)
+			}
+			if acc, ok := toolAccs[e.Index]; ok {
+				raw := acc.jsonBuf.String()
+				// If the model provided no input_json_delta fragments, treat as empty object.
+				// json.RawMessage("") is invalid JSON and will fail when marshalled.
+				if raw == "" {
+					raw = "{}"
+				}
+				input := json.RawMessage(raw)
+				finalisedBlocks[e.Index] = api.ToolUseBlock{
+					ID:    acc.id,
+					Name:  acc.name,
+					Input: input,
+				}
+				delete(toolAccs, e.Index)
+			}
+
+		case api.MessageDeltaEvent:
+			usage.InputTokens = e.InputTokens
+			usage.OutputTokens = e.OutputTokens
+			stopReason = e.StopReason
+		}
+	}
+
+	if err := stream.Err(); err != nil {
+		streamErr = err
+		return "", nil, api.Usage{}, fmt.Errorf("stream read: %w", err)
+	}
+
+	// Reconstruct blocks in index order.
+	blocks = make([]api.ContentBlock, len(finalisedBlocks))
+	for idx, block := range finalisedBlocks {
+		if idx >= len(blocks) {
+			// Defensive: extend if API ever sends non-contiguous indices.
+			blocks = append(blocks, make([]api.ContentBlock, idx-len(blocks)+1)...)
+		}
+		blocks[idx] = block
+	}
+
+	// Remove nil slots (gaps from non-contiguous indices, if any).
+	out := blocks[:0]
+	for _, b := range blocks {
+		if b != nil {
+			out = append(out, b)
+		}
+	}
+
+	return genID, out, usage, nil
+}
 
 // CompactContext runs one summarisation round: replaces all but the last
 // compactionKeepTail messages with a summary. Used by /compact regardless of
@@ -398,23 +518,17 @@ func (l *Loop) runCompactionRound(ctx context.Context, msgs []api.Message) error
 	}
 
 	prompt := "Summarize the following earlier conversation. Do not use tools.\n\n" + body
-	tmpConvo := convo.NewManagerWithSystem(compactionSystemPrompt)
-	tmpConvo.Append(api.UserMessage(prompt))
+	req := api.StreamRequest{
+		System:    compactionSystemPrompt,
+		Messages:  []api.Message{api.UserMessage(prompt)},
+		Tools:     nil,
+		MaxTokens: 4096,
+	}
 
-	ch, _, err := l.driver.Generate(ctx, tmpConvo, nil)
+	summary, _, err := l.collectStreamText(ctx, req)
 	if err != nil {
-		return fmt.Errorf("compaction generate: %w", err)
+		return fmt.Errorf("compaction: %w", err)
 	}
-	var summary string
-	for ev := range ch {
-		switch ev := ev.(type) {
-		case TextYielded:
-			summary += ev.Text
-		case InferenceError:
-			return fmt.Errorf("compaction generate stream: %w", ev.Err)
-		}
-	}
-
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return fmt.Errorf("compaction: empty summary from model")
@@ -422,6 +536,66 @@ func (l *Loop) runCompactionRound(ctx context.Context, msgs []api.Message) error
 
 	l.convo.Summarise(summary, tailCount)
 	return nil
+}
+
+func (l *Loop) collectStreamText(ctx context.Context, req api.StreamRequest) (string, api.Usage, error) {
+	stream, err := l.client.StreamMessage(ctx, req)
+	if err != nil {
+		return "", api.Usage{}, err
+	}
+	defer stream.Close()
+
+	type textAcc struct{ buf strings.Builder }
+	textAccs := map[int]*textAcc{}
+	finalised := map[int]api.ContentBlock{}
+	var usage api.Usage
+	var stopReason string
+
+	for stream.Next() {
+		switch e := stream.Event().(type) {
+		case api.ContentBlockStartEvent:
+			if _, ok := e.ContentBlock.(api.TextBlock); ok {
+				textAccs[e.Index] = &textAcc{}
+			}
+		case api.ContentBlockDeltaEvent:
+			if d, ok := e.Delta.(api.TextDelta); ok {
+				if acc, ok := textAccs[e.Index]; ok {
+					acc.buf.WriteString(d.Text)
+				}
+			}
+		case api.ContentBlockStopEvent:
+			if acc, ok := textAccs[e.Index]; ok {
+				finalised[e.Index] = api.TextBlock{Text: acc.buf.String()}
+				delete(textAccs, e.Index)
+			}
+		case api.MessageDeltaEvent:
+			usage.InputTokens = e.InputTokens
+			usage.OutputTokens = e.OutputTokens
+			stopReason = e.StopReason
+		}
+	}
+	_ = stopReason
+
+	if err := stream.Err(); err != nil {
+		return "", api.Usage{}, err
+	}
+
+	blocks := make([]api.ContentBlock, len(finalised))
+	for idx, block := range finalised {
+		if idx >= len(blocks) {
+			blocks = append(blocks, make([]api.ContentBlock, idx-len(blocks)+1)...)
+		}
+		blocks[idx] = block
+	}
+	var out strings.Builder
+	for _, b := range blocks {
+		if b != nil {
+			if tb, ok := b.(api.TextBlock); ok {
+				out.WriteString(tb.Text)
+			}
+		}
+	}
+	return strings.TrimSpace(out.String()), usage, nil
 }
 
 func serializeMessagesForCompaction(msgs []api.Message) string {
@@ -462,6 +636,244 @@ func serializeMessagesForCompaction(msgs []api.Message) string {
 // ----------------------------------------------------------------------------
 
 // executeTools runs all tool calls from a single assistant response.
+func (l *Loop) executeTools(ctx context.Context, calls []api.ToolUseBlock) ([]api.ToolResultBlock, error) {
+	results := make([]api.ToolResultBlock, len(calls))
+
+	// Plan mode: request one batch approval for all calls that need prompting.
+	// This avoids a cascade of interactive prompts and matches the spec: review
+	// all proposed operations before execution.
+	decisions := make([]tools.Decision, len(calls))
+	for i := range decisions {
+		decisions[i] = tools.Decision(-1) // unknown
+	}
+	if l.perm != nil && l.perm.Mode() == permissions.ModePlan {
+		var batchIdxs []int
+		var batchItems []PermissionBatchItem
+
+		for i, call := range calls {
+			// Default allow when no permission needed.
+			if !l.registry.NeedsPermission(call.Name, call.Input) {
+				decisions[i] = tools.Allow
+				continue
+			}
+
+			if d, ok := l.perm.FastDecision(call.Name); ok {
+				decisions[i] = d
+				continue
+			}
+
+			batchIdxs = append(batchIdxs, i)
+			batchItems = append(batchItems, PermissionBatchItem{
+				ToolName: call.Name,
+				Input:    call.Input,
+				Summary:  summariseInput(call.Name, call.Input),
+			})
+		}
+
+		if len(batchItems) > 0 {
+			respCh := make(chan PermissionDecision, 1)
+			select {
+			case l.eventCh <- PermissionBatchRequestEvent{Items: batchItems, DecisionCh: respCh}:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+
+			var d PermissionDecision
+			select {
+			case d = <-respCh:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+
+			switch d {
+			case PermAllow:
+				for _, idx := range batchIdxs {
+					decisions[idx] = tools.Allow
+				}
+			case PermAlwaysAllow:
+				for _, idx := range batchIdxs {
+					decisions[idx] = tools.Allow
+					l.perm.PersistAllow(calls[idx].Name)
+				}
+			default:
+				for _, idx := range batchIdxs {
+					decisions[idx] = tools.Deny
+				}
+			}
+		}
+	}
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	for i, call := range calls {
+		i, call := i, call // capture for goroutine
+
+		g.Go(func() error {
+			result, err := l.executeSingleTool(gctx, i, call, decisions)
+			if err != nil {
+				return err
+			}
+			results[i] = result
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// executeSingleTool handles one tool call: permission check → execute → emit events.
+func (l *Loop) executeSingleTool(ctx context.Context, idx int, call api.ToolUseBlock, preDecisions []tools.Decision) (api.ToolResultBlock, error) {
+	// If plan mode precomputed a decision for this call, use it.
+	if idx < len(preDecisions) && preDecisions[idx] != tools.Decision(-1) {
+		if preDecisions[idx] == tools.Deny {
+			l.emit(ToolDoneEvent{
+				CallIndex:     idx,
+				ID:            call.ID,
+				Name:          call.Name,
+				IsError:       true,
+				OutputSummary: "denied by user",
+			})
+			return api.ToolResultBlock{
+				ToolUseID: call.ID,
+				Content:   "Tool execution denied by user.",
+				IsError:   true,
+			}, nil
+		}
+		if preDecisions[idx] == tools.AppliedManually {
+			l.emit(ToolDoneEvent{
+				CallIndex:     idx,
+				ID:            call.ID,
+				Name:          call.Name,
+				IsError:       false,
+				OutputSummary: "applied interactively",
+			})
+			return api.ToolResultBlock{
+				ToolUseID: call.ID,
+				Content:   "Changes applied interactively by the user via Interactive Diff.",
+				IsError:   false,
+			}, nil
+		}
+		// Allow path: skip per-tool prompting.
+		goto exec
+	}
+
+	// Check if this tool needs permission before running.
+	if l.registry.NeedsPermission(call.Name, call.Input) && l.perm != nil {
+		decision, _ := l.perm.Check(ctx, call.Name, call.Input)
+
+		if decision == tools.Deny {
+			l.emit(ToolDoneEvent{
+				CallIndex:     idx,
+				ID:            call.ID,
+				Name:          call.Name,
+				IsError:       true,
+				OutputSummary: "denied by user",
+			})
+			return api.ToolResultBlock{
+				ToolUseID: call.ID,
+				Content:   "Tool execution denied by user.",
+				IsError:   true,
+			}, nil
+		}
+		if decision == tools.AppliedManually {
+			l.emit(ToolDoneEvent{
+				CallIndex:     idx,
+				ID:            call.ID,
+				Name:          call.Name,
+				IsError:       false,
+				OutputSummary: "applied interactively",
+			})
+			return api.ToolResultBlock{
+				ToolUseID: call.ID,
+				Content:   "Changes applied interactively by the user via Interactive Diff.",
+				IsError:   false,
+			}, nil
+		}
+	}
+
+exec:
+	l.emit(ToolStartEvent{
+		CallIndex:    idx,
+		ID:           call.ID,
+		Name:         call.Name,
+		InputSummary: summariseInput(call.Name, call.Input),
+	})
+
+	tr := telemetry.TracerFrom(ctx)
+	tid := telemetry.TraceIDFrom(ctx)
+	parentGen := telemetry.SpanIDFrom(ctx)
+	spanID := tr.StartSpan(telemetry.SpanParams{
+		TraceID:  tid,
+		ParentID: parentGen,
+		Name:     call.Name,
+		Input:    json.RawMessage(call.Input),
+	})
+
+	// Warden Action Guard (semantic safety via JSONL Beads) — now also feeds unified decisions via permissions.Engine.
+	wdec := warden.CheckAction(ctx, &droverwarden.GuardRequest{
+		TenantID: os.Getenv("DROVER_TENANT_ID"),
+		ToolCall: &droverwarden.ToolCall{
+			ToolName: call.Name,
+			Args:     func() map[string]any { var a map[string]any; _ = json.Unmarshal(call.Input, &a); return a }(),
+		},
+		Context: map[string]any{
+			"agent_id":  os.Getenv("DROVER_AGENT_ID"),
+			"raw_input": string(call.Input),
+		},
+	})
+	if !wdec.Allowed {
+		execErr := fmt.Errorf("tool blocked by Warden: %s", wdec.Result.Reason)
+		summary := truncate(execErr.Error(), 80)
+		tr.EndSpan(spanID, telemetry.SpanResult{Output: summary, IsError: true, Error: execErr})
+		l.emit(ToolDoneEvent{CallIndex: idx, ID: call.ID, Name: call.Name, IsError: true, OutputSummary: summary})
+		return api.ToolResultBlock{ToolUseID: call.ID, Content: execErr.Error(), IsError: true}, nil
+	}
+
+	output, execErr := l.registry.Execute(ctx, call.Name, call.Input)
+
+	if execErr != nil {
+		summary := truncate(execErr.Error(), 80)
+		tr.EndSpan(spanID, telemetry.SpanResult{
+			Output:  summary,
+			IsError: true,
+			Error:   execErr,
+		})
+		l.emit(ToolDoneEvent{
+			CallIndex:     idx,
+			ID:            call.ID,
+			Name:          call.Name,
+			IsError:       true,
+			OutputSummary: summary,
+		})
+		return api.ToolResultBlock{
+			ToolUseID: call.ID,
+			Content:   execErr.Error(),
+			IsError:   true,
+		}, nil
+	}
+
+	tr.EndSpan(spanID, telemetry.SpanResult{
+		Output:  truncate(output, 2048),
+		IsError: false,
+	})
+
+	l.emit(ToolDoneEvent{
+		CallIndex:     idx,
+		ID:            call.ID,
+		Name:          call.Name,
+		IsError:       false,
+		OutputSummary: truncate(output, 80),
+	})
+
+	return api.ToolResultBlock{
+		ToolUseID: call.ID,
+		Content:   output,
+		IsError:   false,
+	}, nil
+}
 
 // heartbeatInterval returns 0 when heartbeats are disabled.
 func heartbeatInterval() time.Duration {
