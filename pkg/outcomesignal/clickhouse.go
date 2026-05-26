@@ -16,10 +16,10 @@ const insertSpanSQL = `
 	) VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
-func writeSpan(dsn, orgID, traceID, agentSlug string, signals Signals, inputPrompt, outputText string) error {
-	m := make(map[string]any)
-	if s, err := signals.AttributesJSON(); err == nil && s != "" {
-		_ = json.Unmarshal([]byte(s), &m)
+func writeSpan(dsn, orgID, traceID, agentSlug string, signals Signals, inputPrompt, outputText string, extra map[string]any) error {
+	m := signals.AttributesMap()
+	for k, v := range extra {
+		m[k] = v
 	}
 	if inputPrompt != "" {
 		m["user_message"] = inputPrompt

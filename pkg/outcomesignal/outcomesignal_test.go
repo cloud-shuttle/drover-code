@@ -28,6 +28,36 @@ func TestFromRunError_attributesMatchLearnerContract(t *testing.T) {
 	}
 }
 
+func TestFromHostedJob(t *testing.T) {
+	t.Run("merged success", func(t *testing.T) {
+		s := FromHostedJob("succeeded", "merged")
+		if s.CompileSuccess == nil || !*s.CompileSuccess || s.GitMergeMerged == nil || !*s.GitMergeMerged {
+			t.Fatalf("expected all true: %+v", s)
+		}
+	})
+	t.Run("no_changes", func(t *testing.T) {
+		s := FromHostedJob("succeeded", "no_changes")
+		if s.GitMergeMerged == nil || *s.GitMergeMerged {
+			t.Fatalf("expected merge false: %+v", s)
+		}
+	})
+	t.Run("failed job", func(t *testing.T) {
+		s := FromHostedJob("failed", "")
+		if s.CompileSuccess == nil || *s.CompileSuccess {
+			t.Fatalf("expected compile false: %+v", s)
+		}
+	})
+	t.Run("merge_conflict", func(t *testing.T) {
+		s := FromHostedJob("merge_conflict", "merge_conflict")
+		if s.CompileSuccess == nil || !*s.CompileSuccess {
+			t.Fatal("worker ran")
+		}
+		if s.GitMergeMerged == nil || *s.GitMergeMerged {
+			t.Fatal("merge not completed")
+		}
+	})
+}
+
 func TestAttributesJSON(t *testing.T) {
 	f := false
 	raw, err := (Signals{CompileSuccess: &f}).AttributesJSON()
