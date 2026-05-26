@@ -2,6 +2,8 @@
 
 Welcome, AI Agent. This file is intended to help AI coding assistants understand the structure, context, and conventions of the `drover-code` repository.
 
+**Glossary:** [`CONTEXT.md`](CONTEXT.md). **Org index:** [`../AGENTS.md`](../AGENTS.md).
+
 ## Ecosystem Role
 
 > **Part of the Drover Ecosystem**: `drover-code` serves as the **Core Agent Engine**. It is the fast, static Go binary that actually runs the agentic loop, calls the Anthropic API (via `drover-gateway`), and executes tools. It is orchestrated by `drover` and runs headlessly inside `drover-cloud` unikernels.

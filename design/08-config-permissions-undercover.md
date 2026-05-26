@@ -404,38 +404,30 @@ func (e *Engine) Check(ctx context.Context, toolName string, input json.RawMessa
 
 ### 2.9 Input-aware permission decisions
 
-The current implementation ignores the `input json.RawMessage` parameter in
-`Check()`. It treats all calls to the same tool identically — either `bash`
-is allowed or it isn't.
-
-A future refinement would inspect the input to make finer-grained decisions:
+The permission engine supports fine-grained matching of tool inputs via regular expressions. This allows policies like "allow `bash` only for safe commands" or "allow `write_to_file` only in specific directories".
 
 ```go
-// Future: allow read-only bash but prompt for write operations
-func bashNeedsPermission(input json.RawMessage) bool {
-    var inp struct{ Command string `json:"command"` }
-    json.Unmarshal(input, &inp)
-    return looksDestructive(inp.Command)
-}
-
-func looksDestructive(cmd string) bool {
-    destructivePatterns := []string{
-        "rm ", "rmdir", "mv ", "cp ",
-        "chmod ", "chown ", "sudo ",
-        "curl.*|.*bash", "> /",
-        "dd if=",
-    }
-    for _, p := range destructivePatterns {
-        if matchesPattern(cmd, p) { return true }
-    }
-    return false
+type Rule struct {
+    Tool  string            `json:"tool"`
+    Kind  RuleKind          `json:"kind"`  // 0 = allow, 1 = deny
+    Match map[string]string `json:"match,omitempty"` // map of arg name to regex
 }
 ```
 
-This is deliberately not implemented yet. Pattern matching on shell commands is
-inherently fragile — `echo "rm -rf /"` matches but is harmless; `${cmd}` doesn't
-match but could be anything. The `plan` mode (review all operations before
-executing) is a better architectural answer.
+If a rule has a `Match` map, the tool's input JSON is parsed. The rule only applies if all keys in the `Match` map are present in the input and their string representations match the given regular expressions.
+
+For example, to allow `run_command` only for running `go test`:
+```json
+{
+    "tool": "run_command",
+    "kind": 0,
+    "match": {
+        "CommandLine": "^go test"
+    }
+}
+```
+
+Currently, the TUI `AlwaysAllow` button only generates coarse-grained rules (entire tool allowed). Users can manually author fine-grained rules in `.claude/permissions.json` to secure automated agent workflows.
 
 ### 2.10 Testing strategy
 

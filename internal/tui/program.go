@@ -54,7 +54,9 @@ func NewProgram(
 		permitFn,
 	)
 
-	loop := agent.NewLoop(client, convoMgr, registry, eng, eventCh)
+	driver := agent.NewAnthropicInferenceDriver(client)
+	executor := agent.NewDefaultToolExecutor(registry, eng, eventCh)
+	loop := agent.NewLoop(driver, convoMgr, executor, registry, eventCh)
 	config.ApplyAgentLoopOptions(loop, settings)
 	userName := strings.TrimSpace(os.Getenv("USER"))
 	if userName == "" {
@@ -158,7 +160,7 @@ func NewProgram(
 				if expanded, cmdDef, err := cmdExec.EvaluateAndExpand(runCtx, cmdName, parts[1:]); err == nil {
 					input = expanded
 					if cmdDef.Model != "" {
-						loop.SetClient(api.NewClient(os.Getenv("ANTHROPIC_API_KEY"), cmdDef.Model))
+						loop.SetDriver(agent.NewAnthropicInferenceDriver(api.NewClient(os.Getenv("ANTHROPIC_API_KEY"), cmdDef.Model)))
 					}
 				} else if !strings.Contains(err.Error(), "not found") {
 					if strings.Contains(err.Error(), "Drover Guard") {

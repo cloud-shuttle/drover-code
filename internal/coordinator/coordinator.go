@@ -272,11 +272,13 @@ func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, 
 	workerEvents := make(chan agent.Event, 128)
 	go c.forwardWorkerEvents(st.Index, workerEvents)
 
+	workerDriver := agent.NewAnthropicInferenceDriver(c.client)
+	workerExecutor := agent.NewDefaultToolExecutor(reg, permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll), workerEvents)
 	workerLoop := agent.NewLoop(
-		c.client,
+		workerDriver,
 		workerMgr,
+		workerExecutor,
 		reg,
-		permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll),
 		workerEvents,
 	)
 	config.ApplyAgentLoopOptions(workerLoop, c.settings)
