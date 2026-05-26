@@ -12,6 +12,22 @@ func TestFromRunError_success(t *testing.T) {
 	}
 }
 
+func TestFromRunError_attributesMatchLearnerContract(t *testing.T) {
+	raw, err := FromRunError(nil).AttributesJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]bool
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{AttrCompileSuccess, AttrTestsPassed} {
+		if !m[key] {
+			t.Fatalf("expected %s true in BYOC attributes: %v", key, m)
+		}
+	}
+}
+
 func TestAttributesJSON(t *testing.T) {
 	f := false
 	raw, err := (Signals{CompileSuccess: &f}).AttributesJSON()
