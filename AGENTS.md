@@ -2,6 +2,8 @@
 
 Welcome, AI Agent. This file is intended to help AI coding assistants understand the structure, context, and conventions of the `drover-code` repository.
 
+**Glossary:** [`CONTEXT.md`](CONTEXT.md). **Org index:** [`../AGENTS.md`](../AGENTS.md).
+
 ## Ecosystem Role
 
 > **Part of the Drover Ecosystem**: `drover-code` serves as the **Core Agent Engine**. It is the fast, static Go binary that actually runs the agentic loop, calls the Anthropic API (via `drover-gateway`), and executes tools. It is orchestrated by `drover` and runs headlessly inside `drover-cloud` unikernels.
@@ -55,3 +57,24 @@ Fuzz targets are listed in `.github/workflows/ci.yml` (`fuzz` job).
 ## Optional evals
 
 Live Anthropic eval tests are opt-in (`RUN_AGENT_EVALS=1` and API key); see `evals/` and `README.md`.
+
+## TUI Component Architecture (post dcode-001 migration)
+
+The TUI was migrated from a god-model (~956–1290 LOC in model.go) to a proper componentized Bubble Tea design using a deliberate dual-state technique:
+
+- Primary visual regions now have dedicated owners in `internal/tui/components/`:
+  - `statusbar/` — always-visible bar (model, tokens, Guard risk level/reason)
+  - `liveregion/` + `toolspinner/` — active tools + live streaming preview (owns ActiveTools, CompletedTools, StreamLines, Drain)
+  - `historyview/` — scrollable conversation (owns viewport.Model + []core.RenderedTurn, AppendTurn, truncation banner)
+  - `inputarea/` — textarea + autocomplete + queued message banner
+  - `permissionprompt/` — single + batch permission prompts (with jsonPreview)
+
+- `internal/tui/core/types.go` holds lightweight shared types (RenderedTurn, CompletedTool).
+- `internal/tui/styles/colors.go` is the single source of truth for all Col* AdaptiveColors and common lipgloss styles (no more duplicated color definitions in components).
+- `internal/tui/commandpalette/` provides semantic actions (ActionKey + Category + Shortcut + RiskLevel) beyond simple text injection; wired at Ctrl+K with overlay.
+- Guard hooks are real: `pkg/guardclient`, `assessPermissionRisk` (file + bash dangerous patterns), `GuardRiskLevel/Reason` on Model, StatusBar renders risk state.
+
+**Migration history (important for future edits):**
+A safe dual-state period was used (legacy Model fields like m.history/m.activeTools/m.permPrompt lived alongside the component fields). All mutations hit both during transition. Once every call site + test was updated, legacy paths and fields were deleted in focused consolidation passes (HistoryView first, LiveRegion second, Permission + full permission.go deletion third). InputArea kept a lighter `syncInputArea()` bridge. Snapshots and 20+ history/fuzz/e2e tests never drifted. See `design/20-week-1-tui-component-migration.md` (Reality Record section) and beads dcode-001..009 for the full story.
+
+When touching TUI code, prefer the component APIs. Update the component's isolated test + the integration snapshots. Do not re-introduce direct mutations on legacy fields that have been removed.

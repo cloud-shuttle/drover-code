@@ -16,19 +16,25 @@ func (m *Model) View() string {
 		return m.diffModel.View()
 	}
 
+	if m.showingCommandPalette && m.commandPaletteModel != nil {
+		return m.commandPaletteModel.View()
+	}
+
 	if m.width == 0 {
 		return "loading…"
 	}
 
 	var sections []string
 
-	if len(m.history) == 0 && !m.agentBusy && !m.streaming {
+	// HistoryView is the sole owner of conversation history
+	if m.HistoryView != nil && m.HistoryView.Len() == 0 && !m.agentBusy && !m.Live.Streaming {
 		sections = append(sections, m.viewHome())
 	} else {
-		sections = append(sections, m.viewport.View())
+		sections = append(sections, m.HistoryView.View())
 	}
 
-	if live := m.viewLiveRegion(); live != "" {
+	// dcode-004: LiveRegion component is the source of truth
+	if live := m.Live.View(); live != "" {
 		sections = append(sections, live)
 	}
 
@@ -40,14 +46,20 @@ func (m *Model) View() string {
 		sections = append(sections, lipgloss.NewStyle().Foreground(colSubtle).Width(m.width-2).Render(m.compactionBanner))
 	}
 
-	sections = append(sections, m.viewStatusBar())
+	// dcode-003: StatusBar component is the source of truth
+	sections = append(sections, m.StatusBar.View())
 
-	if m.permPrompt != nil {
-		sections = append(sections, m.permPrompt.render(m.width))
-	} else if m.permBatch != nil {
-		sections = append(sections, m.permBatch.render(m.width))
-	} else {
-		sections = append(sections, m.viewInput())
+
+	// dcode-007: prefer new PermissionPrompt components (old perm* render paths removed as dead code)
+	if m.PermPrompt != nil {
+		m.PermPrompt.Width = m.width
+		sections = append(sections, m.PermPrompt.View())
+	} else if m.PermBatch != nil {
+		m.PermBatch.Width = m.width
+		sections = append(sections, m.PermBatch.View())
+	} else if m.InputArea != nil {
+		// dcode-009: InputArea component owns the visual input region
+		sections = append(sections, m.InputArea.View())
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
@@ -104,134 +116,7 @@ func (m *Model) viewHome() string {
 	)
 }
 
-func (m *Model) viewLiveRegion() string {
-	if !m.agentBusy && len(m.activeTools) == 0 {
-		return ""
-	}
 
-	var b strings.Builder
-
-	for _, idx := range m.toolOrder {
-		at, ok := m.activeTools[idx]
-		if !ok {
-			continue
-		}
-		row := fmt.Sprintf("%s  %s  %s",
-			at.spinner.View(),
-			styleToolName.Render(at.name),
-			styleToolSummary.Render(at.summary),
-		)
-		b.WriteString(styleToolRow.Render(row) + "\n")
-	}
-
-	if m.streaming && m.streamLines != "" {
-		preview := lastLines(m.streamLines, liveRegionMaxLines)
-		preview = softenAssistantParagraphBreaks(preview)
-		innerW := m.width - 10
-		if innerW < 24 {
-			innerW = 24
-		}
-		b.WriteString(lipgloss.NewStyle().Width(innerW).Render(preview))
-	}
-
-	content := b.String()
-	if content == "" {
-		return ""
-	}
-	return styleLiveRegion.Width(m.width - 4).Render(strings.TrimRight(content, "\n"))
-}
-
-func (m *Model) viewStatusBar() string {
-	w := m.width
-
-	left := styleStatusModel.Render(" " + m.modelName + " ")
-
-	tokenStr := fmt.Sprintf(" in:%s out:%s ",
-		formatTokens(m.totalInputTokens),
-		formatTokens(m.totalOutputTokens),
-	)
-	right := styleStatusTokens.Render(tokenStr)
-
-	centre := ""
-	if m.agentBusy {
-		centre = styleStatusBar.Render(" ● ")
-	}
-
-	usedWidth := lipgloss.Width(left) + lipgloss.Width(centre) + lipgloss.Width(right)
-	gap := w - usedWidth
-	if gap < 0 {
-		gap = 0
-	}
-	fill := styleStatusBar.Width(gap).Render("")
-
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		left,
-		fill,
-		centre,
-		right,
-	)
-}
-
-func (m *Model) viewInput() string {
-	var border lipgloss.Style
-	if m.inputFocused {
-		border = styleInputBorderFocused
-	} else {
-		border = styleInputBorder
-	}
-
-	input := border.Width(m.width - 2).Render(m.textarea.View())
-
-	if len(m.messageQueue) > 0 {
-		queuedText := fmt.Sprintf("⏳ %d message(s) queued...", len(m.messageQueue))
-		queuedBanner := lipgloss.NewStyle().Foreground(lipgloss.Color("204")).MarginLeft(2).Render(queuedText)
-		input = lipgloss.JoinVertical(lipgloss.Left, queuedBanner, input)
-	}
-
-	if m.showAuto {
-		auto := m.viewAutoComplete()
-		if auto != "" {
-			return lipgloss.JoinVertical(lipgloss.Left, auto, input)
-		}
-	}
-	return input
-}
-
-func (m *Model) viewAutoComplete() string {
-	items := m.filteredAuto()
-	if len(items) == 0 {
-		return ""
-	}
-
-	if len(items) > 6 {
-		items = items[:6]
-	}
-
-	var rows []string
-	for i, item := range items {
-		label := "/" + item.name
-		desc := item.desc
-		var row string
-		if i == m.autoIndex {
-			row = styleAutoItemSelected.Render(
-				fmt.Sprintf("%-16s %s", label, desc),
-			)
-		} else {
-			row = styleAutoItem.Render(
-				fmt.Sprintf("%-16s %s", label, desc),
-			)
-		}
-		rows = append(rows, row)
-	}
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colBorder).
-		Width(m.width - 4).
-		Render(strings.Join(rows, "\n"))
-
-	return box
-}
 
 func lastLines(s string, n int) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")

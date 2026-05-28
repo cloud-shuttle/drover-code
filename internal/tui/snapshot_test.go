@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/cloudshuttle/drover-code/internal/agent"
+	"github.com/cloudshuttle/drover-code/internal/tui/core"
 )
 
 // assertSnapshot compares the actual output with the stored golden file.
@@ -48,16 +49,15 @@ func TestModel_SnapshotMarkdownRendering(t *testing.T) {
 	m.width = 100
 	m.height = 40
 
-	// Trigger markdown compilation
-	m.history = append(m.history, renderedTurn{
-		role: "assistant",
-		content: "# Header\n\nThis is a **bold** and *italic* test.\n\n" +
+	// Trigger markdown compilation via HistoryView (source of truth after consolidation)
+	m.HistoryView.AppendTurn(core.RenderedTurn{
+		Role: "assistant",
+		Content: "# Header\n\nThis is a **bold** and *italic* test.\n\n" +
 			"- List item 1\n- List item 2\n\n" +
 			"```go\nfunc main() {}\n```",
 	})
-	m.rebuildViewport()
 
-	actual := m.viewport.View()
+	actual := m.HistoryView.View()
 	assertSnapshot(t, "markdown_rendering", actual)
 }
 

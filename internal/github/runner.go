@@ -94,7 +94,9 @@ func (r *Runner) run(ctx context.Context, trigger *Trigger) (string, error) {
 		filepath.Join(repoDir, ".claude", "permissions.json"),
 		tools.AllowAll,
 	)
-	loop := agent.NewLoop(r.apiClient, mgr, registry, eng, eventCh)
+	driver := agent.NewAnthropicInferenceDriver(r.apiClient)
+	executor := agent.NewDefaultToolExecutor(registry, eng, eventCh)
+	loop := agent.NewLoop(driver, mgr, executor, registry, eventCh)
 	config.ApplyAgentLoopOptions(loop, repoSettings)
 	runErr := loop.Run(ctx, trigger.Request)
 	close(eventCh)

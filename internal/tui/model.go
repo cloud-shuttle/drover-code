@@ -11,7 +11,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -22,26 +21,15 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/tui/diff"
 	"github.com/cloudshuttle/drover-code/internal/tui/history"
 	"github.com/cloudshuttle/drover-code/internal/tui/historysearch"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/statusbar"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/toolspinner"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/permissionprompt"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/historyview"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/inputarea"
+	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
+	"github.com/cloudshuttle/drover-code/internal/tui/core"
 )
-
-type renderedTurn struct {
-	role    string
-	content string
-	tools   []completedTool
-}
-
-type completedTool struct {
-	name    string
-	summary string
-	isError bool
-}
-
-type activeTool struct {
-	index   int
-	name    string
-	summary string
-	spinner spinner.Model
-}
 
 type slashItem struct {
 	name string
@@ -54,39 +42,50 @@ type RunFunc func(input string) tea.Cmd
 type Model struct {
 	width, height int
 
-	viewport    viewport.Model
-	history     []renderedTurn
-	viewportBuf strings.Builder
-
-	streaming   bool
-	streamBuf   strings.Builder
-	streamLines string
-
-	activeTools map[int]*activeTool
-	toolOrder   []int
-	pendingDone []completedTool
-
-	messageQueue []string
+	// streamBuf is retained for the final Glamour render of assistant turns (used in DoneEvent).
+	// LiveRegion owns the live preview + tool activity.
+	// HistoryView owns conversation history rendering.
+	streamBuf strings.Builder
 
 	inputHistory *history.PersistentHistory
 	historyIndex int
 	savedInput   string
 
-	textarea     textarea.Model
 	inputFocused bool
 
-	autoList  []slashItem
-	autoIndex int
-	showAuto  bool
-
-	permPrompt *permissionPrompt
-	permBatch  *permissionBatchPrompt
+	// dcode-007: Permission prompt components (source of truth)
+	PermPrompt *permissionprompt.PermissionPrompt
+	PermBatch  *permissionprompt.PermissionBatchPrompt
 
 	diffModel   *diff.Model
 	showingDiff bool
 
 	searchModel   *historysearch.Model
 	showingSearch bool
+
+	commandPaletteModel *commandpalette.Model
+	showingCommandPalette bool
+
+	// Components (dcode-003 and beyond)
+	StatusBar   *statusbar.StatusBar
+	Live        *liveregion.LiveRegion
+	HistoryView *historyview.HistoryView
+	InputArea   *inputarea.InputArea
+
+	// Guard / risk state for StatusBar (real hooks + richer behavior)
+	GuardRiskLevel  string // "normal", "caution", "high"
+	GuardRiskReason string // short explanation when risk is elevated
+
+	// extraPaletteCommands are registered by external layers (drover, etc.)
+	// via RegisterPaletteCommands.
+	extraPaletteCommands []commandpalette.Command
+
+	// paletteProviders are functions that can dynamically contribute commands.
+	paletteProviders []commandpalette.CommandProvider
+
+	// paletteActionHandlers map ActionKey -> handler for custom semantic actions.
+	paletteActionHandlers map[string]commandpalette.ActionHandler
+
 
 	glamourRenderer *glamour.TermRenderer
 
@@ -122,35 +121,43 @@ func (m *Model) SetRunCancel(cancel context.CancelFunc) {
 }
 
 func New(eventCh <-chan agent.Event, modelName, workDir, userName, hostName string) *Model {
-	ta := textarea.New()
-	ta.Placeholder = "Message… (Enter to send, Shift+Enter for newline)"
-	ta.ShowLineNumbers = false
-	ta.SetHeight(inputMinHeight)
-	ta.CharLimit = 0
-	ta.Focus()
-	ta.FocusedStyle.Base = lipgloss.NewStyle()
-	ta.BlurredStyle.Base = lipgloss.NewStyle()
-
 	hist, err := history.NewPersistentHistory(workDir)
 	if err != nil {
 		hist = &history.PersistentHistory{}
 	}
 
-	return &Model{
+	m := &Model{
 		eventCh:           eventCh,
 		modelName:         modelName,
 		workDir:           workDir,
 		userName:          userName,
 		hostName:          hostName,
-		activeTools:       make(map[int]*activeTool),
 		inputFocused:      true,
-		textarea:          ta,
-		autoList:          defaultSlashCommands(),
 		maxGlamourRunes:   readMaxGlamourRunesFromEnv(),
 		maxHistoryDisplay: readMaxHistoryDisplayFromEnv(),
 		inputHistory:      hist,
 		historyIndex:      len(hist.Get()),
+		GuardRiskLevel:    "normal", // default for StatusBar risk/guard indicator
 	}
+
+	// Components own their state after the InputArea consolidation
+	m.StatusBar = statusbar.New(modelName)
+	m.StatusBar.RiskLevel = m.GuardRiskLevel
+	m.Live = liveregion.New()
+	m.HistoryView = historyview.New()
+	m.InputArea = inputarea.New()
+
+	// Give InputArea the default slash commands (it is now the owner)
+	defaults := defaultSlashCommands()
+	names := make([]string, len(defaults))
+	descs := make([]string, len(defaults))
+	for i, c := range defaults {
+		names[i] = c.name
+		descs[i] = c.desc
+	}
+	m.InputArea.RegisterSlashCommands(names, descs)
+
+	return m
 }
 
 func readMaxGlamourRunesFromEnv() int {
@@ -230,12 +237,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err != nil {
 					m.lastError = fmt.Sprintf("Failed to apply diff: %v", err)
 				} else {
-					if m.permPrompt != nil {
+					if m.PermPrompt != nil {
 						select {
-						case m.permPrompt.decisionCh <- agent.PermAppliedManually:
+						case m.PermPrompt.DecisionCh <- agent.PermAppliedManually:
 						default:
 						}
-						m.permPrompt = nil
+						m.PermPrompt = nil
 					}
 				}
 
@@ -246,11 +253,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		if m.permPrompt != nil {
+		if m.showingCommandPalette && m.commandPaletteModel != nil {
+			var newModel tea.Model
+			var cmd tea.Cmd
+			newModel, cmd = m.commandPaletteModel.Update(msg)
+			m.commandPaletteModel = newModel.(*commandpalette.Model)
+			return m, cmd
+		}
+
+		if m.PermPrompt != nil {
 			cmd := m.handlePermissionKey(msg)
 			return m, cmd
 		}
-		if m.permBatch != nil {
+		if m.PermBatch != nil {
 			cmd := m.handlePermissionBatchKey(msg)
 			return m, cmd
 		}
@@ -272,17 +287,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showingSearch = true
 			}
 			return m, nil
+
+		case tea.KeyCtrlK:
+			if !m.agentBusy {
+				cmds := m.buildCommandPaletteCommands()
+				m.commandPaletteModel = commandpalette.NewWithCommands(cmds, m.width, m.height)
+				m.showingCommandPalette = true
+			}
+			return m, nil
 		case tea.KeyEnter, tea.KeyCtrlJ:
-			input := strings.TrimSpace(m.textarea.Value())
+			input := strings.TrimSpace(m.InputArea.Value())
 			if input != "" {
 				m.inputHistory.Add(input)
 				m.historyIndex = len(m.inputHistory.Get())
 				m.savedInput = ""
 
-				m.textarea.Reset()
-				m.showAuto = false
+				m.InputArea.Reset()
+				m.InputArea.ClearAutocomplete()
 				m.lastError = ""
-				
+
 				in := strings.ToLower(input)
 				if in == "/quit" || in == "/exit" {
 					return m, tea.Quit
@@ -296,8 +319,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				if m.agentBusy {
-					m.messageQueue = append(m.messageQueue, input)
-					m.rebuildViewport()
+					m.InputArea.Queue(input)
 					m.scrollToBottom()
 					return m, nil
 				}
@@ -305,61 +327,65 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case tea.KeyEsc:
-			m.showAuto = false
-		case tea.KeyUp:
-			if m.showAuto && m.autoIndex > 0 {
-				m.autoIndex--
+			m.InputArea.ClearAutocomplete()
+			if m.showingCommandPalette {
+				m.showingCommandPalette = false
+				m.commandPaletteModel = nil
 				return m, nil
-			} else if !m.showAuto && m.textarea.Line() == 0 {
+			}
+		case tea.KeyUp:
+			if m.InputArea.AutoActive() {
+				m.InputArea.SetAutoIndex(m.InputArea.AutoIndex() - 1)
+				return m, nil
+			} else if !m.InputArea.AutoActive() && m.InputArea.Textarea.Line() == 0 {
 				histEntries := m.inputHistory.Get()
 				if len(histEntries) > 0 && m.historyIndex > 0 {
 					if m.historyIndex == len(histEntries) {
-						m.savedInput = m.textarea.Value()
+						m.savedInput = m.InputArea.Value()
 					}
 					m.historyIndex--
-					m.textarea.SetValue(histEntries[m.historyIndex])
-					m.textarea.CursorEnd()
+					m.InputArea.SetValue(histEntries[m.historyIndex])
+					m.InputArea.CursorEnd()
 					return m, nil
 				}
 			}
 		case tea.KeyDown:
-			if m.showAuto && m.autoIndex < len(m.filteredAuto())-1 {
-				m.autoIndex++
+			if m.InputArea.AutoActive() {
+				m.InputArea.SetAutoIndex(m.InputArea.AutoIndex() + 1)
 				return m, nil
-			} else if !m.showAuto && m.textarea.Line() == m.textarea.LineCount()-1 {
+			} else if !m.InputArea.AutoActive() && m.InputArea.Textarea.Line() == m.InputArea.Textarea.LineCount()-1 {
 				histEntries := m.inputHistory.Get()
 				if m.historyIndex < len(histEntries) {
 					m.historyIndex++
 					if m.historyIndex == len(histEntries) {
-						m.textarea.SetValue(m.savedInput)
+						m.InputArea.SetValue(m.savedInput)
 					} else {
-						m.textarea.SetValue(histEntries[m.historyIndex])
+						m.InputArea.SetValue(histEntries[m.historyIndex])
 					}
-					m.textarea.CursorEnd()
+					m.InputArea.CursorEnd()
 					return m, nil
 				}
 			}
 		case tea.KeyTab:
-			if m.showAuto {
-				filtered := m.filteredAuto()
-				if len(filtered) > 0 {
-					m.textarea.SetValue("/" + filtered[m.autoIndex].name + " ")
-					m.showAuto = false
-					m.textarea.CursorEnd()
-				}
+			if m.InputArea.AcceptAutocomplete() {
 				return m, nil
 			}
 		case tea.KeyPgUp, tea.KeyPgDown:
 			var vpCmd tea.Cmd
-			m.viewport, vpCmd = m.viewport.Update(msg)
-			cmds = append(cmds, vpCmd)
+			if m.HistoryView != nil {
+				m.HistoryView, vpCmd = m.HistoryView.Update(msg)
+				cmds = append(cmds, vpCmd)
+				return m, tea.Batch(cmds...)
+			}
+			// Legacy viewport path removed (HistoryView owns scrolling)
 			return m, tea.Batch(cmds...)
 		}
 
-		var taCmd tea.Cmd
-		m.textarea, taCmd = m.textarea.Update(msg)
+		// Forward to InputArea (now owns the textarea and autocomplete state)
+		_, taCmd := m.InputArea.Update(msg)
 		cmds = append(cmds, taCmd)
-		if v := m.textarea.Value(); v != "" {
+
+		if v := m.InputArea.Value(); v != "" {
 			sanitized := v
 			if strings.Contains(sanitized, "]11;rgb:") {
 				sanitized = stripTerminalOSCResponses(sanitized)
@@ -374,16 +400,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sanitized = stripBareRGBTriplets(sanitized)
 			}
 			if sanitized != v {
-				m.textarea.SetValue(sanitized)
-				m.textarea.CursorEnd()
+				m.InputArea.SetValue(sanitized)
+				m.InputArea.CursorEnd()
 			}
 		}
-		m.updateAutoComplete()
+		m.InputArea.UpdateAutocomplete()
 		return m, tea.Batch(cmds...)
 
 	case historysearch.SelectedMsg:
-		m.textarea.SetValue(msg.Entry)
-		m.textarea.CursorEnd()
+		m.InputArea.SetValue(msg.Entry)
+		m.InputArea.CursorEnd()
 		m.showingSearch = false
 		m.searchModel = nil
 		return m, nil
@@ -391,6 +417,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case historysearch.CancelMsg:
 		m.showingSearch = false
 		m.searchModel = nil
+		return m, nil
+
+	case commandpalette.SelectedMsg:
+		m.showingCommandPalette = false
+		m.commandPaletteModel = nil
+
+		if msg.ActionKey != "" {
+			// First check for externally registered handlers
+			if handler, ok := m.paletteActionHandlers[msg.ActionKey]; ok && handler != nil {
+				if cmd := handler(msg.ActionKey); cmd != nil {
+					return m, cmd
+				}
+			}
+			return m, m.executePaletteAction(msg.ActionKey)
+		}
+
+		// Default: text injection for slash commands
+		m.InputArea.SetValue("/" + msg.Name + " ")
+		m.InputArea.CursorEnd()
+		return m, nil
+
+	case commandpalette.CancelMsg:
+		m.showingCommandPalette = false
+		m.commandPaletteModel = nil
 		return m, nil
 
 	case agentMsg:
@@ -406,19 +456,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			if errors.Is(msg.err, context.Canceled) {
 				m.lastError = "Agent paused by user."
-				m.history = append(m.history, renderedTurn{
-					role:    "system",
-					content: "(/pause) Agent interrupted. Waiting for new instructions...",
+				m.HistoryView.AppendTurn(core.RenderedTurn{
+					Role:    "system",
+					Content: "(/pause) Agent interrupted. Waiting for new instructions...",
 				})
 			} else {
 				m.lastError = msg.err.Error()
+
+				// Real Guard hook: surface blocks from the outer drover-guard in the StatusBar
+				if strings.Contains(msg.err.Error(), "Governance Policy") || strings.Contains(msg.err.Error(), "Drover Guard") {
+					m.SetGuardRisk("high", "command blocked by guard")
+				}
 			}
 		}
 		
-		for len(m.messageQueue) > 0 && !m.agentBusy {
-			nextInput := m.messageQueue[0]
-			m.messageQueue = m.messageQueue[1:]
-			if cmd := m.submitInput(nextInput); cmd != nil {
+		for {
+			next, ok := m.InputArea.Dequeue()
+			if !ok || m.agentBusy {
+				break
+			}
+			if cmd := m.submitInput(next); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -432,19 +489,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastError = msg.err.Error()
 		} else {
 			m.lastError = ""
-			m.history = append(m.history, renderedTurn{
-				role:    "user",
-				content: "(/compact) Older turns were summarised into one context message; recent messages kept.",
+			m.HistoryView.AppendTurn(core.RenderedTurn{
+				Role:    "user",
+				Content: "(/compact) Older turns were summarised into one context message; recent messages kept.",
 			})
 		}
-		m.rebuildViewport()
 		m.scrollToBottom()
 
 		cmds = append(cmds, waitForEvent(m.eventCh))
-		for len(m.messageQueue) > 0 && !m.agentBusy {
-			nextInput := m.messageQueue[0]
-			m.messageQueue = m.messageQueue[1:]
-			if cmd := m.submitInput(nextInput); cmd != nil {
+		for {
+			next, ok := m.InputArea.Dequeue()
+			if !ok || m.agentBusy {
+				break
+			}
+			if cmd := m.submitInput(next); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -452,17 +510,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
-		for idx, at := range m.activeTools {
-			var cmd tea.Cmd
-			m.activeTools[idx].spinner, cmd = at.spinner.Update(msg)
-			cmds = append(cmds, cmd)
+		// dcode-005 consolidation: LiveRegion owns its spinners
+		if m.Live != nil {
+			for idx, ts := range m.Live.ActiveTools {
+				var cmd tea.Cmd
+				m.Live.ActiveTools[idx].Spinner, cmd = ts.Spinner.Update(msg)
+				cmds = append(cmds, cmd)
+			}
 		}
+
+		// Legacy tool spinner loop removed (LiveRegion is now the sole owner)
 		return m, tea.Batch(cmds...)
 	}
-
-	var vpCmd tea.Cmd
-	m.viewport, vpCmd = m.viewport.Update(msg)
-	cmds = append(cmds, vpCmd)
 
 	return m, tea.Batch(cmds...)
 }
@@ -471,43 +530,51 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 	switch e := ev.(type) {
 	case agent.TextDeltaEvent:
 		m.streamBuf.WriteString(e.Text)
-		m.streamLines = stripCursorPositionReports(m.streamBuf.String())
-		m.streamLines = stripTerminalOSCResponses(m.streamLines)
+
+		// LiveRegion is the sole owner of live streaming preview
+		if m.Live != nil {
+			preview := stripCursorPositionReports(m.streamBuf.String())
+			preview = stripTerminalOSCResponses(preview)
+			m.Live.Streaming = true
+			m.Live.StreamLines = preview
+		}
+
 		m.scrollToBottom()
 
 	case agent.ToolStartEvent:
-		sp := spinner.New()
-		sp.Spinner = spinner.Dot
-		sp.Style = styleToolPending
-		at := &activeTool{
-			index:   e.CallIndex,
-			name:    e.Name,
-			summary: e.InputSummary,
-			spinner: sp,
-		}
-		m.activeTools[e.CallIndex] = at
-		m.toolOrder = append(m.toolOrder, e.CallIndex)
+		// LiveRegion is the sole owner of active tool spinners
+		ts := toolspinner.New(e.Name, e.InputSummary)
+		m.Live.ActiveTools[e.CallIndex] = ts
+		m.Live.ToolOrder = append(m.Live.ToolOrder, e.CallIndex)
 		m.scrollToBottom()
-		return sp.Tick
+		return ts.Spinner.Tick
 
 	case agent.ToolDoneEvent:
-		if _, ok := m.activeTools[e.CallIndex]; ok {
-			done := completedTool{
-				name:    e.Name,
-				summary: e.OutputSummary,
-				isError: e.IsError,
+		// LiveRegion is the sole owner of active tools + completed tools
+		if _, ok := m.Live.ActiveTools[e.CallIndex]; ok {
+			done := core.CompletedTool{
+				Name:    e.Name,
+				Summary: e.OutputSummary,
+				IsError: e.IsError,
 			}
-			m.pendingDone = append(m.pendingDone, done)
-			delete(m.activeTools, e.CallIndex)
-			for i, idx := range m.toolOrder {
+			m.Live.CompletedTools = append(m.Live.CompletedTools, done)
+
+			delete(m.Live.ActiveTools, e.CallIndex)
+			for i, idx := range m.Live.ToolOrder {
 				if idx == e.CallIndex {
-					m.toolOrder = append(m.toolOrder[:i], m.toolOrder[i+1:]...)
+					m.Live.ToolOrder = append(m.Live.ToolOrder[:i], m.Live.ToolOrder[i+1:]...)
 					break
 				}
 			}
 		}
 
 	case agent.PermissionRequestEvent:
+		// Deeper Guard heuristics (beyond simple tool names)
+		level, reason := m.assessPermissionRisk(e.ToolName, e.Input, e.Summary)
+		if level != "" && level != "normal" {
+			m.SetGuardRisk(level, reason)
+		}
+
 		if e.ToolName == "edit_file" {
 			filePath, diffStr, err := fs.PreviewEdit(m.workDir, e.Input)
 			if err == nil && diffStr != "" && diffStr != "no changes" {
@@ -515,38 +582,49 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 				m.diffModel = &dm
 				m.showingDiff = true
 				
-				m.permPrompt = &permissionPrompt{
-					toolName:   e.ToolName,
-					summary:    e.Summary,
-					inputJSON:  e.Input,
-					decisionCh: e.DecisionCh,
+				// dcode-007: PermissionPrompt component (legacy dual-state fully removed)
+				m.PermPrompt = &permissionprompt.PermissionPrompt{
+					ToolName:   e.ToolName,
+					Summary:    e.Summary,
+					InputJSON:  e.Input,
+					DecisionCh: e.DecisionCh,
 				}
-				m.permBatch = nil
+				m.PermBatch = nil
 				m.scrollToBottom()
 				return nil
 			}
 		}
 
-		m.permPrompt = &permissionPrompt{
-			toolName:   e.ToolName,
-			summary:    e.Summary,
-			inputJSON:  e.Input,
-			decisionCh: e.DecisionCh,
+		// dcode-007: PermissionPrompt component
+		m.PermPrompt = &permissionprompt.PermissionPrompt{
+			ToolName:   e.ToolName,
+			Summary:    e.Summary,
+			InputJSON:  e.Input,
+			DecisionCh: e.DecisionCh,
 		}
-		m.permBatch = nil
+		m.PermBatch = nil
 
 	case agent.PermissionBatchRequestEvent:
-		m.permBatch = &permissionBatchPrompt{
-			items:      e.Items,
-			decisionCh: e.DecisionCh,
+		// dcode-007: PermissionBatchPrompt component (legacy dual-state removed)
+		m.PermBatch = &permissionprompt.PermissionBatchPrompt{
+			Items:      e.Items,
+			DecisionCh: e.DecisionCh,
 		}
-		m.permPrompt = nil
+		m.PermPrompt = nil
 
 	case agent.UsageEvent:
 		m.totalInputTokens = e.TotalInputTokens
 		m.totalOutputTokens = e.TotalOutputTokens
 		m.lastAPICallInput = e.InputTokens
 		m.lastAPICallOutput = e.OutputTokens
+
+		// dcode-003: dual-state sync to StatusBar component
+		if m.StatusBar != nil {
+			m.StatusBar.InputTokens = e.TotalInputTokens
+			m.StatusBar.OutputTokens = e.TotalOutputTokens
+			m.StatusBar.RiskLevel = m.GuardRiskLevel
+			m.StatusBar.RiskReason = m.GuardRiskReason
+		}
 
 	case agent.HeartbeatEvent:
 		// Orchestrator telemetry only; no TUI update.
@@ -565,78 +643,101 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 		raw := m.streamBuf.String()
 		if raw != "" {
 			rendered := m.renderMarkdown(raw)
-			completed := m.pendingDone
-			m.pendingDone = nil
-			m.history = append(m.history, renderedTurn{
-				role:    "assistant",
-				content: rendered,
-				tools:   completed,
+
+			// LiveRegion is the sole source for completed tools for this turn
+			var completed []core.CompletedTool
+			if drained := m.Live.DrainCompletedTools(); len(drained) > 0 {
+				completed = drained
+			}
+
+			// HistoryView is the sole owner of conversation history
+			m.HistoryView.AppendTurn(core.RenderedTurn{
+				Role:    "assistant",
+				Content: rendered,
+				Tools:   completed,
 			})
+			m.HistoryView.GotoBottom()
 		}
 
 		m.streamBuf.Reset()
-		m.streamLines = ""
-		m.activeTools = make(map[int]*activeTool)
-		m.toolOrder = nil
-		m.streaming = false
+
+		m.Live.Streaming = false
 		m.agentBusy = false
 
-		if len(m.messageQueue) > 0 {
-			nextInput := m.messageQueue[0]
-			m.messageQueue = m.messageQueue[1:]
-			return m.submitInput(nextInput)
+		if m.StatusBar != nil {
+			m.StatusBar.AgentBusy = false
 		}
 
-		m.rebuildViewport()
+		// LiveRegion is the sole owner of live state
+		m.Live.Streaming = false
+		m.Live.StreamLines = ""
+		m.Live.ActiveTools = make(map[int]*toolspinner.ToolSpinner)
+		m.Live.ToolOrder = nil
+		m.Live.CompletedTools = nil
+
+		if next, ok := m.InputArea.Dequeue(); ok {
+			return m.submitInput(next)
+		}
+
 		m.scrollToBottom()
 
 	case agent.ErrorEvent:
 		m.lastError = e.Err.Error()
 		m.agentBusy = false
-		m.messageQueue = nil // Clear the queue on error
-		m.streaming = false
+		_ = m.InputArea.DrainQueue() // Clear the queue on error
+		m.Live.Streaming = false
 		m.streamBuf.Reset()
-		m.streamLines = ""
 		m.compactionBanner = ""
+
+		if m.StatusBar != nil {
+			m.StatusBar.AgentBusy = false
+		}
+
+		// LiveRegion is the sole owner of live state
+		m.Live.Streaming = false
+		m.Live.StreamLines = ""
+		m.Live.ActiveTools = make(map[int]*toolspinner.ToolSpinner)
+		m.Live.ToolOrder = nil
+		m.Live.CompletedTools = nil
 	}
 
 	return nil
 }
 
 func (m *Model) handlePermissionKey(msg tea.KeyMsg) tea.Cmd {
-	if m.permPrompt == nil {
+	if m.PermPrompt == nil {
 		return nil
 	}
 
 	switch msg.String() {
 	case "y", "Y":
-		m.permPrompt.respond(agent.PermAllow)
-		m.permPrompt = nil
+		m.PermPrompt.Respond(agent.PermAllow)
+		m.PermPrompt = nil
 	case "a", "A":
-		m.permPrompt.respond(agent.PermAlwaysAllow)
-		m.permPrompt = nil
+		m.PermPrompt.Respond(agent.PermAlwaysAllow)
+		m.PermPrompt = nil
 	case "n", "N", "q", tea.KeyEsc.String():
-		m.permPrompt.respond(agent.PermDeny)
-		m.permPrompt = nil
+		m.PermPrompt.Respond(agent.PermDeny)
+		m.PermPrompt = nil
 	}
 	return nil
 }
 
 func (m *Model) handlePermissionBatchKey(msg tea.KeyMsg) tea.Cmd {
-	if m.permBatch == nil {
+	if m.PermBatch == nil {
 		return nil
 	}
 
 	switch msg.String() {
 	case "y", "Y":
-		m.permBatch.respond(agent.PermAllow)
-		m.permBatch = nil
+		m.PermBatch.Respond(agent.PermAllow)
+		m.PermBatch = nil
 	case "a", "A":
-		m.permBatch.respond(agent.PermAlwaysAllow)
-		m.permBatch = nil
+		m.PermBatch.Respond(agent.PermAlwaysAllow)
+		m.PermBatch = nil
 	case "n", "N", "q", tea.KeyEsc.String():
-		m.permBatch.respond(agent.PermDeny)
-		m.permBatch = nil
+		m.PermBatch.Respond(agent.PermDeny)
+		m.PermBatch = nil
 	}
 	return nil
 }
@@ -646,13 +747,26 @@ func (m *Model) submitInput(input string) tea.Cmd {
 		return cmd
 	}
 
-	m.history = append(m.history, renderedTurn{
-		role:    "user",
-		content: input,
-	})
+	// HistoryView is the sole owner of conversation history
+	m.HistoryView.AppendTurn(core.RenderedTurn{Role: "user", Content: input})
+	m.HistoryView.GotoBottom()
 	m.agentBusy = true
-	m.streaming = true
-	m.rebuildViewport()
+	m.Live.Streaming = true
+
+	// dcode-005 consolidation: sync to components, clear previous live state on new input
+	if m.StatusBar != nil {
+		m.StatusBar.AgentBusy = true
+	}
+	if m.Live != nil {
+		m.Live.Streaming = false
+		m.Live.StreamLines = ""
+		// Optionally clear any stale active tools on new user turn (usually DoneEvent should have done this)
+		if len(m.Live.ActiveTools) > 0 {
+			m.Live.ActiveTools = make(map[int]*toolspinner.ToolSpinner)
+			m.Live.ToolOrder = nil
+		}
+	}
+
 	m.scrollToBottom()
 
 	if m.runFunc != nil {
@@ -681,15 +795,14 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 		} else {
 			prompt = fmt.Sprintf("Create or update the Markdown file %q using write_file (create parent directories if needed) with a plan that addresses: %s\n\nBe specific and actionable. When done, briefly confirm the path.", path, detail)
 		}
-		m.history = append(m.history, renderedTurn{role: "user", content: in})
+		m.HistoryView.AppendTurn(core.RenderedTurn{Role: "user", Content: in})
 		m.lastError = ""
 		m.agentBusy = true
-		m.streaming = true
-		m.rebuildViewport()
+		m.Live.Streaming = true
 		m.scrollToBottom()
 		if m.runFunc == nil {
 			m.agentBusy = false
-			m.streaming = false
+			m.Live.Streaming = false
 			m.lastError = "agent not wired"
 			return nil, true
 		}
@@ -700,14 +813,15 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 	case "/quit", "/exit":
 		return tea.Quit, true
 	case "/clear", "/reset":
-		m.history = nil
+		m.HistoryView.Clear()
 		m.streamBuf.Reset()
-		m.streamLines = ""
+		if m.Live != nil {
+			m.Live.StreamLines = ""
+		}
 		m.lastError = ""
 		if m.convoMgr != nil {
 			m.convoMgr.Reset()
 		}
-		m.rebuildViewport()
 		return nil, true
 	case "/tokens":
 		m.appendLocalInfo(m.tokensInfoText())
@@ -722,15 +836,20 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 		}
 		m.lastError = ""
 		m.agentBusy = true
+
+		// dcode-005: dual-state sync for compaction busy state
+		if m.StatusBar != nil {
+			m.StatusBar.AgentBusy = true
+		}
+
 		return tea.Batch(runCompact(m.compactFn), waitForEvent(m.eventCh)), true
 	}
 	return nil, false
 }
 
 func (m *Model) appendLocalInfo(text string) {
-	m.history = append(m.history, renderedTurn{role: "user", content: text})
-	m.rebuildViewport()
-	m.scrollToBottom()
+	m.HistoryView.AppendTurn(core.RenderedTurn{Role: "user", Content: text})
+	m.HistoryView.GotoBottom()
 }
 
 func (m *Model) tokensInfoText() string {
@@ -778,26 +897,7 @@ func (m *Model) modelInfoText() string {
 	))
 }
 
-func (m *Model) updateAutoComplete() {
-	val := m.textarea.Value()
-	if strings.HasPrefix(val, "/") && !strings.Contains(val, " ") {
-		m.showAuto = true
-		m.autoIndex = 0
-	} else {
-		m.showAuto = false
-	}
-}
 
-func (m *Model) filteredAuto() []slashItem {
-	val := strings.TrimPrefix(m.textarea.Value(), "/")
-	var out []slashItem
-	for _, item := range m.autoList {
-		if strings.HasPrefix(item.name, val) {
-			out = append(out, item)
-		}
-	}
-	return out
-}
 
 func defaultSlashCommands() []slashItem {
 	return []slashItem{
@@ -817,14 +917,27 @@ func (m *Model) relayout() {
 		return
 	}
 
-	m.textarea.SetWidth(m.width - 4)
-
-	vpHeight := m.viewportHeight()
-	if vpHeight < 1 {
-		vpHeight = 1
+	if m.InputArea != nil {
+		m.InputArea.SetSize(m.width)
 	}
-	m.viewport = viewport.New(m.width, vpHeight)
-	m.viewport.Style = lipgloss.NewStyle()
+
+	// dcode-003/004/008: keep components sized
+	if m.StatusBar != nil {
+		m.StatusBar.SetSize(m.width, 1)
+		m.StatusBar.RiskLevel = m.GuardRiskLevel
+		m.StatusBar.RiskReason = m.GuardRiskReason
+	}
+	if m.Live != nil {
+		m.Live.SetSize(m.width, 0)
+	}
+	if m.HistoryView != nil {
+		hv := m.viewportHeight()
+		m.HistoryView.SetSize(m.width, hv)
+		m.HistoryView.MaxHistoryDisplay = m.maxHistoryDisplay
+	}
+	if m.InputArea != nil {
+		m.InputArea.SetSize(m.width)
+	}
 
 	renderWidth := m.width - 4
 	if renderWidth < 40 {
@@ -837,13 +950,11 @@ func (m *Model) relayout() {
 	if err == nil {
 		m.glamourRenderer = r
 	}
-
-	m.rebuildViewport()
 }
 
 func (m *Model) viewportHeight() int {
 	reserved := statusBarHeight + inputTotalHeight + 2
-	if m.permPrompt != nil || m.permBatch != nil {
+	if m.PermPrompt != nil || m.PermBatch != nil {
 		reserved = statusBarHeight + permPromptHeight + 2
 	}
 	h := m.height - reserved
@@ -853,56 +964,10 @@ func (m *Model) viewportHeight() int {
 	return h
 }
 
-func (m *Model) rebuildViewport() {
-	hist := m.history
-	omit := 0
-	if m.maxHistoryDisplay > 0 && len(hist) > m.maxHistoryDisplay {
-		omit = len(hist) - m.maxHistoryDisplay
-		hist = hist[len(hist)-m.maxHistoryDisplay:]
+func (m *Model) scrollToBottom() {
+	if m.HistoryView != nil {
+		m.HistoryView.GotoBottom()
 	}
-	m.viewportBuf.Reset()
-	if omit > 0 {
-		note := fmt.Sprintf("(+%d older turns hidden from display only; full history still sent to the API.)\n\n", omit)
-		m.viewportBuf.WriteString(lipgloss.NewStyle().Foreground(colSubtle).Render(note))
-	}
-	for i, turn := range hist {
-		if i > 0 {
-			m.viewportBuf.WriteByte('\n')
-		}
-		m.viewportBuf.WriteString(m.renderTurn(turn))
-	}
-	m.viewport.SetContent(m.viewportBuf.String())
-}
-
-func (m *Model) scrollToBottom() { m.viewport.GotoBottom() }
-
-func (m *Model) renderTurn(t renderedTurn) string {
-	var b strings.Builder
-
-	switch t.role {
-	case "user":
-		b.WriteString(styleUserLabel.Render("you") + "\n")
-		b.WriteString(styleUserBubble.Width(m.width-4).Render(t.content) + "\n")
-
-	case "assistant":
-		b.WriteString(styleAssistantLabel.Render("drover-code") + "\n")
-		for _, ct := range t.tools {
-			b.WriteString(renderCompletedTool(ct))
-		}
-		b.WriteString(styleAssistantBody.Render(t.content))
-	}
-
-	b.WriteString("\n\n")
-	return b.String()
-}
-
-func renderCompletedTool(ct completedTool) string {
-	icon := styleToolDone.Render("\u2713 ")
-	if ct.isError {
-		icon = styleToolError.Render("\u2717 ")
-	}
-	line := icon + styleToolName.Render(ct.name) + " " + styleToolSummary.Render(ct.summary)
-	return styleToolRow.Render(line) + "\n"
 }
 
 func (m *Model) renderMarkdown(raw string) string {
@@ -942,14 +1007,204 @@ func (m *Model) SetCompactFn(fn func() error) { m.compactFn = fn }
 
 func (m *Model) SetConversation(mgr *convo.Manager) { m.convoMgr = mgr }
 
-// RegisterCustomCommands adds custom commands to the auto-complete list.
-func (m *Model) RegisterCustomCommands(names, descs []string) {
-	for i, name := range names {
-		desc := ""
-		if i < len(descs) {
-			desc = descs[i]
+// SetGuardRisk allows external code (e.g. drover-guard, program.go, or event handlers)
+// to push real risk signals into the TUI so the StatusBar can reflect them.
+func (m *Model) SetGuardRisk(level, reason string) {
+	m.GuardRiskLevel = level
+	m.GuardRiskReason = reason
+
+	if m.StatusBar != nil {
+		m.StatusBar.RiskLevel = level
+		m.StatusBar.RiskReason = reason
+	}
+}
+
+// assessPermissionRisk provides deeper, more realistic risk heuristics than simple tool-name matching.
+// It looks at tool name + input content for dangerous patterns.
+func (m *Model) assessPermissionRisk(toolName string, inputJSON []byte, summary string) (level, reason string) {
+	inputStr := strings.ToLower(string(inputJSON))
+	summaryLower := strings.ToLower(summary)
+
+	switch toolName {
+	case "edit_file", "write_file", "multi_edit":
+		// Check for high-risk files
+		if strings.Contains(inputStr, ".env") ||
+			strings.Contains(inputStr, "package.json") ||
+			strings.Contains(inputStr, ".github/workflows") ||
+			strings.Contains(inputStr, "/etc/") ||
+			strings.Contains(inputStr, "dockerfile") {
+			return "high", "editing sensitive configuration or build files"
 		}
-		m.autoList = append(m.autoList, slashItem{name: name, desc: desc})
+		return "caution", "modifying source files"
+
+	case "bash":
+		// Much better shell analysis
+		dangerous := []string{
+			"rm -rf", "rm -r /", "dd if=", "> /dev/", "mkfs", "format ",
+			"curl | bash", "wget | bash", "sh <(", ":(){ :|:& };:", "eval $(curl",
+			"shutdown", "reboot", "halt", "poweroff",
+		}
+		for _, pat := range dangerous {
+			if strings.Contains(inputStr, pat) || strings.Contains(summaryLower, pat) {
+				return "high", "potentially destructive shell command"
+			}
+		}
+		return "caution", "executing shell command"
+
+	case "delete_file":
+		return "high", "deleting files"
+
+	case "run_terminal_cmd", "execute_command":
+		return "caution", "running terminal command"
+	}
+
+	return "normal", ""
+}
+
+// RegisterCustomCommands adds custom commands to the auto-complete list (owned by InputArea).
+func (m *Model) RegisterCustomCommands(names, descs []string) {
+	if m.InputArea != nil {
+		m.InputArea.RegisterSlashCommands(names, descs)
+	}
+}
+
+// RegisterPaletteCommands allows external code to contribute additional entries
+// to the Command Palette (Ctrl+K). These commands are merged with the built-in ones.
+//
+// This is the primary extension point for richer integration (semantic actions
+// with Category, Shortcut, RiskLevel, and direct ActionKey execution).
+func (m *Model) RegisterPaletteCommands(commands []commandpalette.Command) {
+	m.extraPaletteCommands = append(m.extraPaletteCommands, commands...)
+}
+
+// RegisterPaletteProvider registers a function that will be called every time
+// the Command Palette is opened. The provider can return context-dependent
+// or dynamically generated commands.
+//
+// Multiple providers can be registered; their results are appended in
+// registration order.
+func (m *Model) RegisterPaletteProvider(provider commandpalette.CommandProvider) {
+	if provider == nil {
+		return
+	}
+	m.paletteProviders = append(m.paletteProviders, provider)
+}
+
+// RegisterPaletteActionHandler registers a handler for a specific ActionKey.
+//
+// When a semantic action with that key is selected from the palette,
+// the handler will be invoked. If it returns a non-nil tea.Cmd, that
+// command is executed. If it returns nil (or no handler is registered),
+// the default behavior applies (text injection for unknown keys).
+//
+// This allows external systems to own execution of their own semantic actions.
+func (m *Model) RegisterPaletteActionHandler(actionKey string, handler commandpalette.ActionHandler) {
+	if actionKey == "" || handler == nil {
+		return
+	}
+	if m.paletteActionHandlers == nil {
+		m.paletteActionHandlers = make(map[string]commandpalette.ActionHandler)
+	}
+	m.paletteActionHandlers[actionKey] = handler
+}
+
+// buildCommandPaletteCommands returns the list of commands for the palette.
+// It includes all registered slash commands plus a few first-class semantic actions.
+func (m *Model) buildCommandPaletteCommands() []commandpalette.Command {
+	var cmds []commandpalette.Command
+
+	// Existing slash commands come from InputArea (sole owner after consolidation)
+	for _, c := range m.InputArea.Commands() {
+		cmds = append(cmds, commandpalette.Command{
+			Name:        c.Name,
+			Description: c.Desc,
+		})
+	}
+
+	// Externally registered commands (from drover, custom extensions, etc.)
+	cmds = append(cmds, m.extraPaletteCommands...)
+
+	// Dynamic providers (called every time the palette opens)
+	for _, provider := range m.paletteProviders {
+		if provider != nil {
+			cmds = append(cmds, provider()...)
+		}
+	}
+
+	// Semantic actions (direct execution) — now with categories and shortcuts for richer palette UX
+	cmds = append(cmds, commandpalette.Command{
+		Name:        "compact",
+		Description: "Summarise and compress context (direct)",
+		ActionKey:   "compact",
+		Category:    "Agent",
+		Shortcut:    "⌘K C",
+		RiskLevel:   "normal",
+	})
+	cmds = append(cmds, commandpalette.Command{
+		Name:        "clear",
+		Description: "Clear conversation history (direct)",
+		ActionKey:   "clear",
+		Category:    "TUI",
+		Shortcut:    "⌘K X",
+		RiskLevel:   "caution",
+	})
+	cmds = append(cmds, commandpalette.Command{
+		Name:        "tokens",
+		Description: "Show detailed token usage (direct)",
+		ActionKey:   "tokens",
+		Category:    "TUI",
+		Shortcut:    "⌘K T",
+	})
+	cmds = append(cmds, commandpalette.Command{
+		Name:        "model",
+		Description: "Show current model info (direct)",
+		ActionKey:   "model",
+		Category:    "TUI",
+	})
+
+	return cmds
+}
+
+// executePaletteAction handles semantic actions selected from the palette.
+func (m *Model) executePaletteAction(key string) tea.Cmd {
+	switch key {
+	case "compact":
+		if m.compactFn != nil {
+			m.agentBusy = true
+			if m.StatusBar != nil {
+				m.StatusBar.AgentBusy = true
+			}
+			m.Live.Streaming = false
+			return tea.Batch(runCompact(m.compactFn), waitForEvent(m.eventCh))
+		}
+		m.lastError = "compaction is not available"
+		return nil
+
+	case "clear", "reset":
+		m.HistoryView.Clear()
+		m.streamBuf.Reset()
+		if m.Live != nil {
+			m.Live.StreamLines = ""
+		}
+		m.lastError = ""
+		if m.convoMgr != nil {
+			m.convoMgr.Reset()
+		}
+		return nil
+
+	case "tokens":
+		m.appendLocalInfo(m.tokensInfoText())
+		return nil
+
+	case "model":
+		m.appendLocalInfo(m.modelInfoText())
+		return nil
+
+	default:
+		// Unknown semantic action — fall back to text injection
+		m.InputArea.SetValue("/" + key + " ")
+		m.InputArea.CursorEnd()
+		return nil
 	}
 }
 

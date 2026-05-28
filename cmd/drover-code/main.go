@@ -135,6 +135,15 @@ func main() {
 
 	sessionID := fmt.Sprintf("session-%x", time.Now().UnixNano())
 	baseCtx := telemetry.WithSessionID(context.Background(), sessionID)
+	
+	// Phase 4: Linear Telemetry Context
+	if issueID := telemetry.ExtractIssueID(workDir, startupFlags.LinearIssue); issueID != "" {
+		baseCtx = telemetry.WithLinearIssue(baseCtx, issueID)
+	}
+	if linClient := telemetry.NewLinearClient(); linClient != nil {
+		baseCtx = telemetry.WithLinearClient(baseCtx, linClient)
+	}
+
 	ctx, cancel := signal.NotifyContext(telemetry.WithTracer(baseCtx, lf), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -345,7 +354,9 @@ func runHeadless(
 
 	eventCh := make(chan agent.Event, 256)
 	eng := headlessPermissionEngine(settings, workDir)
-	loop := agent.NewLoop(client, mgr, registry, eng, eventCh)
+	driver := agent.NewAnthropicInferenceDriver(client)
+	executor := agent.NewDefaultToolExecutor(registry, eng, eventCh)
+	loop := agent.NewLoop(driver, mgr, executor, registry, eventCh)
 	config.ApplyAgentLoopOptions(loop, settings)
 	if n := headlessMaxSessionTokens(); n > 0 {
 		loop.SetMaxSessionTokens(n)
@@ -360,6 +371,30 @@ func runHeadless(
 	if dw != nil {
 		dw.Start(ctx)
 	}
+
+	// PHASE 5: Watchdog goroutine enforcing wall-clock timeout and token budget outside the agent loop.
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		maxTokens := headlessMaxSessionTokens()
+		for {
+			select {
+			case <-ctx.Done():
+				if ctx.Err() == context.DeadlineExceeded {
+					fmt.Fprintln(os.Stderr, "drover-code: watchdog: wall-clock timeout exceeded")
+					writeHeadlessResultFile(workDir, loop, false, 0, "timeout exceeded (watchdog)")
+					os.Exit(4)
+				}
+				return // Normal exit or context cancellation
+			case <-ticker.C:
+				if maxTokens > 0 && loop.SessionOutputTokens() > maxTokens {
+					fmt.Fprintln(os.Stderr, "drover-code: watchdog: token budget exceeded")
+					writeHeadlessResultFile(workDir, loop, false, 0, "token budget exceeded (watchdog)")
+					os.Exit(4)
+				}
+			}
+		}
+	}()
 
 	hadErr := false
 	exitCode := 1
@@ -414,7 +449,7 @@ func runHeadless(
 				if cmdDef.Model != "" {
 					loopClient := api.NewClient(anthropicAPIKey(), cmdDef.Model)
 					api.ApplyGatewayEnv(loopClient)
-					loop.SetClient(loopClient)
+					loop.SetDriver(agent.NewAnthropicInferenceDriver(loopClient))
 				}
 			} else if !strings.Contains(err.Error(), "not found") {
 				if strings.Contains(err.Error(), "Drover Guard") {
@@ -611,7 +646,9 @@ func runBridgeMode(
 		filepath.Join(workDir, ".claude", "permissions.json"),
 		tools.AllowAll,
 	)
-	loop := agent.NewLoop(client, mgr, registry, eng, eventCh)
+	driver := agent.NewAnthropicInferenceDriver(client)
+	executor := agent.NewDefaultToolExecutor(registry, eng, eventCh)
+	loop := agent.NewLoop(driver, mgr, executor, registry, eventCh)
 	config.ApplyAgentLoopOptions(loop, settings)
 	go func() {
 		for range eventCh {
@@ -626,7 +663,9 @@ func runBridgeMode(
 	b := bridge.NewStdioBridge()
 	bridge.RegisterStandardHandlers(b, func(bCtx context.Context, input string) (string, error) {
 		innerCh := make(chan agent.Event, 256)
-		innerLoop := agent.NewLoop(client, mgr, registry, eng, innerCh)
+		innerDriver := agent.NewAnthropicInferenceDriver(client)
+		innerExecutor := agent.NewDefaultToolExecutor(registry, eng, innerCh)
+		innerLoop := agent.NewLoop(innerDriver, mgr, innerExecutor, registry, innerCh)
 		config.ApplyAgentLoopOptions(innerLoop, settings)
 		var out strings.Builder
 		done := make(chan struct{})

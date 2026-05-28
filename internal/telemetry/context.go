@@ -9,6 +9,8 @@ const (
 	traceIDKey
 	spanIDKey
 	sessionIDKey
+	linearClientKey
+	linearIssueKey
 )
 
 // WithTracer attaches a Tracer to a context.
@@ -59,6 +61,32 @@ func WithSessionID(ctx context.Context, id string) context.Context {
 // SessionIDFrom extracts the current session ID from a context.
 func SessionIDFrom(ctx context.Context) string {
 	if id, ok := ctx.Value(sessionIDKey).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// WithLinearClient attaches the LinearClient to the context.
+func WithLinearClient(ctx context.Context, client *LinearClient) context.Context {
+	return context.WithValue(ctx, linearClientKey, client)
+}
+
+// LinearClientFrom extracts the LinearClient from the context.
+func LinearClientFrom(ctx context.Context) *LinearClient {
+	if client, ok := ctx.Value(linearClientKey).(*LinearClient); ok {
+		return client
+	}
+	return nil
+}
+
+// WithLinearIssue attaches the current linear issue ID to the context.
+func WithLinearIssue(ctx context.Context, issueID string) context.Context {
+	return context.WithValue(ctx, linearIssueKey, issueID)
+}
+
+// LinearIssueFrom extracts the linear issue ID from the context.
+func LinearIssueFrom(ctx context.Context) string {
+	if id, ok := ctx.Value(linearIssueKey).(string); ok {
 		return id
 	}
 	return ""

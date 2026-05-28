@@ -112,6 +112,9 @@ Optional per-workspace image built by the **execution client** when `drover-work
 **Sandbox agent**  
 Headless Drover Code inside `/workspace` during an **agent job**. May use workspace tools (read/write/edit, bash, glob, grep, git read and commit *inside the sandbox*, web_fetch). Denied: `git_push` (no Git credentials on worker), all `ukc_*` (lifecycle owned by **execution client**), and infra-provisioning tools. Sandbox git history is ephemeral; **result integration** creates the real **job branch** from the **result payload**. On **hosted execution**, Brain access via Gateway MCP and **ephemeral job credential** only.
 
+**Inference driver**  
+The interface (seam) between the orchestrating **sandbox agent** loop and the underlying LLM/inference network mechanics. It abstracts away specific chunking, token tracking, and SSE parsing (e.g. Anthropic's message chunks) and yields complete semantic intents (text generation, tool call requests) to the agent loop.
+
 **Drover Warden (deferred)**  
 Semantic content safety (JSONL Beads: bash patterns, PII, input/output guards) is **not** embedded in Milestone A hosted runs—**`unikernel` preset** provides structural tool allow/deny only. When Warden ships on hosted jobs, it runs **in-process here on the worker** (action guard before tool execute; input/output around LLM turns)—not at Gateway. See [`../drover-warden/CONTEXT.md`](../drover-warden/CONTEXT.md).
 

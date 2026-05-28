@@ -40,7 +40,7 @@ func FuzzModel_permissionPromptKeys(f *testing.F) {
 		m2 := next.(*Model)
 
 		if data[0] != 0 {
-			if m2.permPrompt != nil {
+			if m2.PermPrompt != nil {
 				t.Fatal("esc should clear prompt")
 			}
 			if d := <-dec; d != agent.PermDeny {
@@ -52,7 +52,7 @@ func FuzzModel_permissionPromptKeys(f *testing.F) {
 		b := data[1]
 		isDecisionKey := b == 'y' || b == 'Y' || b == 'n' || b == 'N' || b == 'a' || b == 'A' || b == 'q'
 		if isDecisionKey {
-			if m2.permPrompt != nil {
+			if m2.PermPrompt != nil {
 				t.Fatalf("prompt should clear for key %q", b)
 			}
 			select {
@@ -76,7 +76,7 @@ func FuzzModel_permissionPromptKeys(f *testing.F) {
 			}
 			return
 		}
-		if m2.permPrompt == nil {
+		if m2.PermPrompt == nil {
 			t.Fatalf("prompt should remain for key %q", b)
 		}
 		select {
@@ -118,7 +118,7 @@ func FuzzModel_permissionBatchKeys(f *testing.F) {
 		m2 := next.(*Model)
 
 		if data[0] != 0 {
-			if m2.permBatch != nil {
+			if m2.PermBatch != nil {
 				t.Fatal("esc should clear batch")
 			}
 			if d := <-dec; d != agent.PermDeny {
@@ -130,7 +130,7 @@ func FuzzModel_permissionBatchKeys(f *testing.F) {
 		b := data[1]
 		isDecisionKey := b == 'y' || b == 'Y' || b == 'n' || b == 'N' || b == 'a' || b == 'A' || b == 'q'
 		if isDecisionKey {
-			if m2.permBatch != nil {
+			if m2.PermBatch != nil {
 				t.Fatalf("batch should clear for key %q", b)
 			}
 			select {
@@ -154,7 +154,7 @@ func FuzzModel_permissionBatchKeys(f *testing.F) {
 			}
 			return
 		}
-		if m2.permBatch == nil {
+		if m2.PermBatch == nil {
 			t.Fatalf("batch prompt should remain for key %q", b)
 		}
 		select {

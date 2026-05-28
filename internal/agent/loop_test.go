@@ -107,7 +107,9 @@ func TestLoop_ExecutesToolThenCompletes(t *testing.T) {
 
 	events := make(chan Event, 256)
 	eng := permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 
 	var toolStarts, toolDones, done int
 	drainDone := make(chan struct{})
@@ -168,7 +170,9 @@ func TestLoop_TwoSequentialUserTurns(t *testing.T) {
 	reg := tools.NewRegistry()
 	events := make(chan Event, 256)
 	eng := permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 
 	go func() {
 		for range events {
@@ -232,7 +236,9 @@ func TestLoop_TokenBudgetExceeded(t *testing.T) {
 	reg := tools.NewRegistry()
 	events := make(chan Event, 256)
 	eng := permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 	loop.SetMaxSessionTokens(50)
 	go func() {
 		for range events {
@@ -259,7 +265,9 @@ func TestLoop_ContextDeadline(t *testing.T) {
 	reg := tools.NewRegistry()
 	events := make(chan Event, 256)
 	eng := permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 	go func() {
 		for range events {
 		}
@@ -321,7 +329,9 @@ func TestLoop_HeartbeatDuringSlowTool(t *testing.T) {
 
 	events := make(chan Event, 256)
 	eng := permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 
 	var heartbeats int
 	drainDone := make(chan struct{})
@@ -393,7 +403,9 @@ func TestLoop_ExecutesToolsInParallel(t *testing.T) {
 
 	events := make(chan Event, 256)
 	eng := permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 	go func() {
 		for range events {
 		}
@@ -458,7 +470,9 @@ func TestLoop_ModePlan_BatchAllow(t *testing.T) {
 			return tools.Deny
 		},
 	)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -528,7 +542,9 @@ func TestLoop_ModePlan_BatchDeny(t *testing.T) {
 			return tools.Deny
 		},
 	)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -600,7 +616,9 @@ func TestLoop_CompactContext(t *testing.T) {
 	reg.Register(&sleepTool{})
 	events := make(chan Event, 64)
 	eng := permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 
 	if err := loop.CompactContext(context.Background()); err != nil {
 		t.Fatalf("CompactContext: %v", err)
@@ -656,7 +674,9 @@ func TestLoop_AutoCompactionBeforeAgentTurn(t *testing.T) {
 	reg.Register(&sleepTool{})
 	events := make(chan Event, 256)
 	eng := permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 
 	go func() {
 		for range events {
@@ -709,7 +729,9 @@ func TestLoop_SkipAutoCompactionWhenDisabled(t *testing.T) {
 	reg.Register(&sleepTool{})
 	events := make(chan Event, 256)
 	eng := permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll)
-	loop := NewLoop(client, mgr, reg, eng, events)
+	driver := NewAnthropicInferenceDriver(client)
+	executor := NewDefaultToolExecutor(reg, eng, events)
+	loop := NewLoop(driver, mgr, executor, reg, events)
 	loop.SetAutoCompaction(false)
 
 	go func() {

@@ -15,6 +15,7 @@ type cliFlags struct {
 	CloudMode         bool
 	AcceptCmd         string
 	Verbose           bool
+	LinearIssue       string
 }
 
 // parseCLIFlags extracts known flags from argv. Unknown tokens are ignored so
@@ -66,6 +67,14 @@ func parseCLIFlags(argv []string) (cliFlags, error) {
 			f.AcceptCmd = argv[i]
 		case strings.HasPrefix(a, "--accept-cmd="):
 			f.AcceptCmd = strings.TrimPrefix(a, "--accept-cmd=")
+		case a == "--linear-issue":
+			if i+1 >= len(argv) {
+				return f, fmt.Errorf("%s: issue ID required", a)
+			}
+			i++
+			f.LinearIssue = argv[i]
+		case strings.HasPrefix(a, "--linear-issue="):
+			f.LinearIssue = strings.TrimPrefix(a, "--linear-issue=")
 		default:
 			// ignore unknown
 		}
