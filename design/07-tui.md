@@ -409,3 +409,19 @@ assert(t, model.showAuto == false)
 
 *Previous: [`06-git-web-tools.md`](./06-git-web-tools.md)*  
 *Next: [`08-config-permissions-undercover.md`](./08-config-permissions-undercover.md)*
+
+---
+
+## Post-Migration Component Structure (dcode-001, 2026-05)
+
+After the component migration (dual-state extraction followed by ownership consolidation passes):
+
+- `internal/tui/components/statusbar/` — StatusBar (risk/Guard aware)
+- `internal/tui/components/liveregion/` + `toolspinner/` — live activity + tool spinners (sole owner of active/completed tools + streaming preview)
+- `internal/tui/components/historyview/` — conversation history (sole owner of viewport + RenderedTurn list)
+- `internal/tui/components/inputarea/` — textarea + autocomplete + queue banner (sync bridge from legacy fields still present)
+- `internal/tui/components/permissionprompt/` — single + batch prompts (jsonPreview internal)
+
+`internal/tui/core/types.go` + `styles/colors.go` (central Col* + lipgloss styles) + `commandpalette/` (semantic actions with Category/Shortcut/RiskLevel) complete the layer.
+
+Model is now primarily orchestration. View() composes the four regions + overlays (palette, diff, search, permission). Legacy fields for history/live/permission were deleted after every call site and test was updated. See `design/20-week-1-tui-component-migration.md` (Reality Record) and beads dcode-001/002–009 for the full dual-state → consolidation story. All snapshots remained stable throughout.

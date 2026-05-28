@@ -1,23 +1,28 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
 
+	"github.com/cloudshuttle/drover-code/internal/tui/styles"
+)
+
+// Re-export central colors for use inside the tui package (maintains existing lowercase names)
 var (
-	colBase    = lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#e8e8e8"}
-	colMuted   = lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#888888"}
-	colSubtle  = lipgloss.AdaptiveColor{Light: "#9a9a9a", Dark: "#555555"}
-	colSurface = lipgloss.AdaptiveColor{Light: "#f4f4f4", Dark: "#1e1e1e"}
-	colBorder  = lipgloss.AdaptiveColor{Light: "#d0d0d0", Dark: "#333333"}
+	colBase    = styles.ColBase
+	colMuted   = styles.ColMuted
+	colSubtle  = styles.ColSubtle
+	colSurface = styles.ColSurface
+	colBorder  = styles.ColBorder
 
-	colAccent    = lipgloss.AdaptiveColor{Light: "#b5690a", Dark: "#e8a020"}
-	colAccentDim = lipgloss.AdaptiveColor{Light: "#c98020", Dark: "#a06010"}
+	colAccent    = styles.ColAccent
+	colAccentDim = styles.ColAccentDim
 
-	colSuccess = lipgloss.AdaptiveColor{Light: "#2d7a2d", Dark: "#4caf50"}
-	colError   = lipgloss.AdaptiveColor{Light: "#c0392b", Dark: "#ef5350"}
-	colWarning = lipgloss.AdaptiveColor{Light: "#b5690a", Dark: "#ffa726"}
+	colSuccess = styles.ColSuccess
+	colError   = styles.ColError
+	colWarning = styles.ColWarning
 
-	colUserBg = lipgloss.AdaptiveColor{Light: "#eaf0fb", Dark: "#1a2233"}
-	colUserFg = lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#dce8ff"}
+	colUserBg = styles.ColUserBg
+	colUserFg = styles.ColUserFg
 )
 
 const (
@@ -79,16 +84,16 @@ var (
 			PaddingBottom(1).
 			MarginBottom(1)
 
-	styleStatusBar = lipgloss.NewStyle().
+	StyleStatusBar = lipgloss.NewStyle().
 			Foreground(colMuted).
 			Background(colSurface)
 
-	styleStatusModel = lipgloss.NewStyle().
+	StyleStatusModel = lipgloss.NewStyle().
 				Foreground(colAccent).
 				Background(colSurface).
 				Bold(true)
 
-	styleStatusTokens = lipgloss.NewStyle().
+	StyleStatusTokens = lipgloss.NewStyle().
 				Foreground(colSubtle).
 				Background(colSurface)
 
@@ -100,31 +105,7 @@ var (
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(colAccent)
 
-	stylePermBox = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colWarning).
-			Padding(1, 2)
-
-	stylePermTitle = lipgloss.NewStyle().
-			Foreground(colWarning).
-			Bold(true)
-
-	stylePermTool = lipgloss.NewStyle().
-			Foreground(colAccent).
-			Bold(true)
-
-	stylePermSummary = lipgloss.NewStyle().
-				Foreground(colMuted)
-
-	stylePermKey = lipgloss.NewStyle().
-			Foreground(colBase).
-			Background(colSurface).
-			Bold(true).
-			PaddingLeft(1).
-			PaddingRight(1)
-
-	stylePermKeyLabel = lipgloss.NewStyle().
-				Foreground(colMuted)
+	// StylePerm* removed (dead code after permissionprompt component extraction + render deletion in permission.go)
 
 	styleAutoItem = lipgloss.NewStyle().
 			PaddingLeft(2).

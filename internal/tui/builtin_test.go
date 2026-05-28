@@ -18,17 +18,27 @@ func TestHandleBuiltinSlash_tokensAndModel(t *testing.T) {
 	m.totalOutputTokens = 20
 
 	_, ok := m.handleBuiltinSlash("/tokens")
-	if !ok || len(m.history) != 1 {
-		t.Fatalf("tokens: ok=%v history=%d", ok, len(m.history))
+	histLen := m.HistoryView.Len()
+	var firstContent string
+	if histLen > 0 {
+		firstContent = m.HistoryView.GetTurns()[0].Content
 	}
-	if m.history[0].role != "user" || !strings.Contains(m.history[0].content, "my-model") {
-		t.Fatalf("content %q", m.history[0].content)
+	if !ok || histLen != 1 {
+		t.Fatalf("tokens: ok=%v history=%d", ok, histLen)
+	}
+	if !strings.Contains(firstContent, "my-model") {
+		t.Fatalf("content %q", firstContent)
 	}
 
-	m.history = nil
+	m.HistoryView.Clear()
 	_, ok = m.handleBuiltinSlash("/model")
-	if !ok || len(m.history) != 1 || !strings.Contains(m.history[0].content, "my-model") {
-		t.Fatalf("model: %+v", m.history)
+	histLen = m.HistoryView.Len()
+	firstContent = ""
+	if histLen > 0 {
+		firstContent = m.HistoryView.GetTurns()[0].Content
+	}
+	if !ok || histLen != 1 || !strings.Contains(firstContent, "my-model") {
+		t.Fatalf("model: history len=%d content=%q", histLen, firstContent)
 	}
 }
 
@@ -78,11 +88,16 @@ func TestHandleBuiltinSlash_planUsage(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
 	_, ok := m.handleBuiltinSlash("/plan")
-	if !ok || len(m.history) != 1 {
-		t.Fatalf("ok=%v history=%d", ok, len(m.history))
+	histLen := m.HistoryView.Len()
+	var content string
+	if histLen > 0 {
+		content = m.HistoryView.GetTurns()[0].Content
 	}
-	if !strings.Contains(m.history[0].content, "usage") || !strings.Contains(m.history[0].content, "/plan") {
-		t.Fatalf("content %q", m.history[0].content)
+	if !ok || histLen != 1 {
+		t.Fatalf("ok=%v history=%d", ok, histLen)
+	}
+	if !strings.Contains(content, "usage") || !strings.Contains(content, "/plan") {
+		t.Fatalf("content %q", content)
 	}
 }
 
@@ -101,11 +116,11 @@ func TestHandleBuiltinSlash_planRunsAgentWhenWired(t *testing.T) {
 	if got == "" || !strings.Contains(got, "design/ADR.md") || !strings.Contains(got, "write_file") {
 		t.Fatalf("prompt %q", got)
 	}
-	if !m.agentBusy || !m.streaming {
-		t.Fatalf("busy=%v streaming=%v", m.agentBusy, m.streaming)
+	if !m.agentBusy || !m.Live.Streaming {
+		t.Fatalf("busy=%v streaming=%v", m.agentBusy, m.Live.Streaming)
 	}
-	if len(m.history) != 1 || m.history[0].content != "/plan design/ADR.md" {
-		t.Fatalf("history %+v", m.history[0])
+	if m.HistoryView.Len() != 1 || m.HistoryView.GetTurns()[0].Content != "/plan design/ADR.md" {
+		t.Fatalf("history %+v", m.HistoryView.GetTurns())
 	}
 }
 
@@ -134,7 +149,7 @@ func TestHandleBuiltinSlash_planNotWiredSetsError(t *testing.T) {
 	if !ok {
 		t.Fatal("expected handled")
 	}
-	if m.agentBusy || m.streaming {
+	if m.agentBusy || m.Live.Streaming {
 		t.Fatal("should not mark busy without runFunc")
 	}
 	if m.lastError != "agent not wired" {

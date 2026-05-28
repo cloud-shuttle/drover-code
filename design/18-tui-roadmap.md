@@ -31,10 +31,10 @@
 
 | Feature | Priority | Why It Beats the Competition |
 |---------|----------|------------------------------|
-| **Command Palette (`Ctrl+K`)** | High | Faster workflow than slash commands alone |
+| **Command Palette (`Ctrl+K`)** | ✅ High (foundation shipped) | Semantic actions (ActionKey + Category + Shortcut + RiskLevel), not just text injection. See commandpalette/ and model.go:buildCommandPaletteCommands |
 | **Theme System (Dark/Light + Custom)** | High | Enterprise look & accessibility |
 | **Session Trees / Branching** | High | Governed branching with Drover Guard |
-| **Live Agent Status Bar** | High | Real-time risk & Guard enforcement status |
+| **Live Agent Status Bar** | ✅ High (delivered + Guard hooks) | Real-time risk & Guard enforcement status. GuardRiskLevel/Reason on Model, assessPermissionRisk (file + bash patterns), StatusBar renders "● CAUTION (reason)" + high-risk red. See pkg/guardclient + statusbar + model.SetGuardRisk |
 | **Audit Log Viewer (in-TUI)** | Medium | Instant compliance visibility |
 | **Vim Keybindings Mode** | Medium | Seamless Power-user experience |
 
