@@ -18,6 +18,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
 )
 
 type Program struct {
@@ -88,6 +89,58 @@ func NewProgram(
 			descs = append(descs, c.Description)
 		}
 		model.RegisterCustomCommands(names, descs)
+
+		// Rich Command Palette integration using the new extensibility APIs.
+		//
+		// 1. Use a CommandProvider so the list of custom commands is dynamic
+		//    (reflects commands added/removed at runtime) and carries rich
+		//    metadata (Category + RiskLevel derived from RiskTier).
+		model.RegisterPaletteProvider(func() []commandpalette.Command {
+			var paletteCmds []commandpalette.Command
+			for _, c := range cmdExec.GetRegistry().List() {
+				risk := "normal"
+				switch {
+				case c.RiskTier >= 2:
+					risk = "high"
+				case c.RiskTier >= 1:
+					risk = "caution"
+				}
+
+				actionKey := "custom:" + c.Name
+
+				paletteCmds = append(paletteCmds, commandpalette.Command{
+					Name:        c.Name,
+					Description: c.Description,
+					Category:    "Custom",
+					RiskLevel:   risk,
+					ActionKey:   actionKey, // mark as semantic action
+				})
+			}
+			return paletteCmds
+		})
+
+		// 2. Register handlers so that selecting a custom command from the
+		//    palette executes it *directly* (instead of just injecting text).
+		//    This is the power of RegisterPaletteActionHandler.
+		for _, c := range cmdExec.GetRegistry().List() {
+			name := c.Name
+			actionKey := "custom:" + name
+
+			model.RegisterPaletteActionHandler(actionKey, func(key string) tea.Cmd {
+				cmdToRun := "/" + name
+
+				// Update the visible input (nice UX feedback)
+				model.InputArea.SetValue(cmdToRun + " ")
+				model.InputArea.CursorEnd()
+
+				// Execute directly via the normal run path.
+				// This is equivalent to the user typing the command and pressing Enter.
+				if model.runFunc != nil {
+					return model.runFunc(cmdToRun)
+				}
+				return nil
+			})
+		}
 	}
 
 	model.SetRunFunc(func(input string) tea.Cmd {

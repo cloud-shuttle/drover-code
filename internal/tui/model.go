@@ -76,6 +76,17 @@ type Model struct {
 	GuardRiskLevel  string // "normal", "caution", "high"
 	GuardRiskReason string // short explanation when risk is elevated
 
+	// extraPaletteCommands are registered by external layers (drover, etc.)
+	// via RegisterPaletteCommands.
+	extraPaletteCommands []commandpalette.Command
+
+	// paletteProviders are functions that can dynamically contribute commands.
+	paletteProviders []commandpalette.CommandProvider
+
+	// paletteActionHandlers map ActionKey -> handler for custom semantic actions.
+	paletteActionHandlers map[string]commandpalette.ActionHandler
+
+
 	glamourRenderer *glamour.TermRenderer
 
 	eventCh <-chan agent.Event
@@ -413,6 +424,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commandPaletteModel = nil
 
 		if msg.ActionKey != "" {
+			// First check for externally registered handlers
+			if handler, ok := m.paletteActionHandlers[msg.ActionKey]; ok && handler != nil {
+				if cmd := handler(msg.ActionKey); cmd != nil {
+					return m, cmd
+				}
+			}
 			return m, m.executePaletteAction(msg.ActionKey)
 		}
 
@@ -1051,6 +1068,46 @@ func (m *Model) RegisterCustomCommands(names, descs []string) {
 	}
 }
 
+// RegisterPaletteCommands allows external code to contribute additional entries
+// to the Command Palette (Ctrl+K). These commands are merged with the built-in ones.
+//
+// This is the primary extension point for richer integration (semantic actions
+// with Category, Shortcut, RiskLevel, and direct ActionKey execution).
+func (m *Model) RegisterPaletteCommands(commands []commandpalette.Command) {
+	m.extraPaletteCommands = append(m.extraPaletteCommands, commands...)
+}
+
+// RegisterPaletteProvider registers a function that will be called every time
+// the Command Palette is opened. The provider can return context-dependent
+// or dynamically generated commands.
+//
+// Multiple providers can be registered; their results are appended in
+// registration order.
+func (m *Model) RegisterPaletteProvider(provider commandpalette.CommandProvider) {
+	if provider == nil {
+		return
+	}
+	m.paletteProviders = append(m.paletteProviders, provider)
+}
+
+// RegisterPaletteActionHandler registers a handler for a specific ActionKey.
+//
+// When a semantic action with that key is selected from the palette,
+// the handler will be invoked. If it returns a non-nil tea.Cmd, that
+// command is executed. If it returns nil (or no handler is registered),
+// the default behavior applies (text injection for unknown keys).
+//
+// This allows external systems to own execution of their own semantic actions.
+func (m *Model) RegisterPaletteActionHandler(actionKey string, handler commandpalette.ActionHandler) {
+	if actionKey == "" || handler == nil {
+		return
+	}
+	if m.paletteActionHandlers == nil {
+		m.paletteActionHandlers = make(map[string]commandpalette.ActionHandler)
+	}
+	m.paletteActionHandlers[actionKey] = handler
+}
+
 // buildCommandPaletteCommands returns the list of commands for the palette.
 // It includes all registered slash commands plus a few first-class semantic actions.
 func (m *Model) buildCommandPaletteCommands() []commandpalette.Command {
@@ -1062,6 +1119,16 @@ func (m *Model) buildCommandPaletteCommands() []commandpalette.Command {
 			Name:        c.Name,
 			Description: c.Desc,
 		})
+	}
+
+	// Externally registered commands (from drover, custom extensions, etc.)
+	cmds = append(cmds, m.extraPaletteCommands...)
+
+	// Dynamic providers (called every time the palette opens)
+	for _, provider := range m.paletteProviders {
+		if provider != nil {
+			cmds = append(cmds, provider()...)
+		}
 	}
 
 	// Semantic actions (direct execution) — now with categories and shortcuts for richer palette UX

@@ -963,3 +963,73 @@ func TestModel_GuardRiskFromGuardError(t *testing.T) {
 		t.Fatal("StatusBar not updated with high risk from guard error")
 	}
 }
+
+// TestModel_PaletteRegistrationAPI verifies the expanded Command Palette
+// extension points (static + dynamic providers + action handlers).
+func TestModel_PaletteRegistrationAPI(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "sonnet", "/w", "u", "h")
+	m.width = 80
+	m.height = 30
+
+	// Static registration
+	m.RegisterPaletteCommands([]commandpalette.Command{
+		{
+			Name:        "my-static",
+			Description: "A static extension",
+			Category:    "Custom",
+			RiskLevel:   "caution",
+		},
+	})
+
+	// Dynamic provider
+	m.RegisterPaletteProvider(func() []commandpalette.Command {
+		return []commandpalette.Command{
+			{Name: "dynamic-1", Description: "From provider"},
+		}
+	})
+
+	// Action handler registration
+	called := false
+	m.RegisterPaletteActionHandler("my-action", func(key string) tea.Cmd {
+		called = true
+		return nil
+	})
+
+	// Open the palette
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+
+	if m.commandPaletteModel == nil {
+		t.Fatal("expected palette to be open")
+	}
+
+	// Verify that building the command list includes our additions.
+	cmds := m.buildCommandPaletteCommands()
+	foundStatic := false
+	foundDynamic := false
+	for _, c := range cmds {
+		if c.Name == "my-static" {
+			foundStatic = true
+		}
+		if c.Name == "dynamic-1" {
+			foundDynamic = true
+		}
+	}
+	if !foundStatic {
+		t.Error("static registered command not present in palette")
+	}
+	if !foundDynamic {
+		t.Error("dynamic provider command not present in palette")
+	}
+
+	// Simulate selecting a registered action (exercises the handler path)
+	_, cmd := m.Update(commandpalette.SelectedMsg{
+		Name:      "my-action",
+		ActionKey: "my-action",
+	})
+
+	if !called {
+		t.Error("registered action handler was not invoked")
+	}
+	_ = cmd
+}

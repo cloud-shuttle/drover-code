@@ -1,5 +1,7 @@
 package commandpalette
 
+import tea "github.com/charmbracelet/bubbletea"
+
 // Command represents an entry in the Command Palette.
 //
 // It supports two modes:
@@ -28,3 +30,17 @@ type Command struct {
 func (c Command) IsSemantic() bool {
 	return c.ActionKey != ""
 }
+
+// CommandProvider is a function that can dynamically supply additional
+// commands when the palette is opened. This enables context-aware or
+// lazily-loaded commands (e.g. from a custom commands system).
+type CommandProvider func() []Command
+
+// ActionHandler is a callback registered by external code to handle
+// execution of a specific semantic ActionKey.
+//
+// If the handler returns a non-nil tea.Cmd, that command will be executed
+// by the TUI. If it returns nil, the palette will fall back to the default
+// behavior (text injection for unknown keys).
+type ActionHandler func(actionKey string) tea.Cmd
+
