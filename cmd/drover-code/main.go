@@ -20,9 +20,9 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/bridge"
+	"github.com/cloudshuttle/drover-code/internal/commands"
 	"github.com/cloudshuttle/drover-code/internal/config"
 	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/commands"
 	"github.com/cloudshuttle/drover-code/internal/coordinator"
 	"github.com/cloudshuttle/drover-code/internal/dream"
 	github "github.com/cloudshuttle/drover-code/internal/github"
@@ -135,7 +135,7 @@ func main() {
 
 	sessionID := fmt.Sprintf("session-%x", time.Now().UnixNano())
 	baseCtx := telemetry.WithSessionID(context.Background(), sessionID)
-	
+
 	// Phase 4: Linear Telemetry Context
 	if issueID := telemetry.ExtractIssueID(workDir, startupFlags.LinearIssue); issueID != "" {
 		baseCtx = telemetry.WithLinearIssue(baseCtx, issueID)
@@ -362,6 +362,8 @@ func runHeadless(
 		loop.SetMaxSessionTokens(n)
 	}
 	useJSONL := headlessUseJSONL()
+	headlessSession = sessionLogFromEnv()
+	headlessSession.begin()
 	if useJSONL {
 		go drainHeadlessJSONL(eventCh)
 	} else {
@@ -383,14 +385,14 @@ func runHeadless(
 				if ctx.Err() == context.DeadlineExceeded {
 					fmt.Fprintln(os.Stderr, "drover-code: watchdog: wall-clock timeout exceeded")
 					writeHeadlessResultFile(workDir, loop, false, 0, "timeout exceeded (watchdog)")
-					os.Exit(4)
+					exitHeadless(4, "failed")
 				}
 				return // Normal exit or context cancellation
 			case <-ticker.C:
 				if maxTokens > 0 && loop.SessionOutputTokens() > maxTokens {
 					fmt.Fprintln(os.Stderr, "drover-code: watchdog: token budget exceeded")
 					writeHeadlessResultFile(workDir, loop, false, 0, "token budget exceeded (watchdog)")
-					os.Exit(4)
+					exitHeadless(4, "failed")
 				}
 			}
 		}
@@ -406,7 +408,7 @@ func runHeadless(
 		if input == "" || input == "/quit" {
 			return false
 		}
-		
+
 		if strings.HasPrefix(input, "/") {
 			parts := strings.Fields(input)
 			cmdName := strings.TrimPrefix(parts[0], "/")
@@ -461,6 +463,7 @@ func runHeadless(
 			}
 		}
 
+		headlessSession.userMessage(input)
 		err := loop.Run(ctx, input)
 		sumTurns += loop.LastRunTurns()
 		if err != nil {
@@ -489,7 +492,7 @@ func runHeadless(
 				dw.Wait()
 			}
 			writeHeadlessResultFile(workDir, loop, false, sumTurns, err.Error())
-			os.Exit(2)
+			exitHeadless(2, "failed")
 		}
 		if stop := runOne(string(b)); stop {
 			break
@@ -508,7 +511,7 @@ func runHeadless(
 				dw.Wait()
 			}
 			writeHeadlessResultFile(workDir, loop, false, sumTurns, err.Error())
-			os.Exit(2)
+			exitHeadless(2, "failed")
 		}
 	}
 
@@ -524,14 +527,15 @@ func runHeadless(
 	writeHeadlessResultFile(workDir, loop, overallOK, sumTurns, errMsg)
 
 	if hadErr {
-		os.Exit(exitCode)
+		exitHeadless(exitCode, "failed")
 	}
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			os.Exit(4)
+			exitHeadless(4, "failed")
 		}
-		os.Exit(1)
+		exitHeadless(1, "failed")
 	}
+	headlessSession.finish("completed")
 }
 
 func headlessExitCode(err error) int {
@@ -940,6 +944,7 @@ Custom commands are force multipliers. Use them liberally to maintain consistenc
 
 func printEvents(ch <-chan agent.Event) {
 	for event := range ch {
+		recordSessionObserve(event)
 		switch e := event.(type) {
 		case agent.TextDeltaEvent:
 			fmt.Print(e.Text)

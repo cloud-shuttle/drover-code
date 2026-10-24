@@ -13,6 +13,7 @@ import (
 func drainHeadlessJSONL(ch <-chan agent.Event) {
 	enc := json.NewEncoder(os.Stdout)
 	for ev := range ch {
+		recordSessionObserve(ev)
 		ts := time.Now().UTC().Format(time.RFC3339Nano)
 		switch e := ev.(type) {
 		case agent.TextDeltaEvent:
