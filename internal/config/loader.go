@@ -59,6 +59,13 @@ type Settings struct {
 	DisableAutoCompaction      bool                     `json:"disableAutoCompaction,omitempty"`
 	DreamMaxRetentionEntries   int                      `json:"dreamMaxRetentionEntries,omitempty"`
 	DreamMaxRetentionAgeDays   int                      `json:"dreamMaxRetentionAgeDays,omitempty"`
+
+	// Theme configuration (foundation for TUI Theme System roadmap item)
+	Theme struct {
+		Mode    string            `json:"mode,omitempty"`    // "auto", "light", "dark"
+		Palette string            `json:"palette,omitempty"` // named palette e.g. "default", "high-contrast"
+		Colors  map[string]string `json:"colors,omitempty"`  // custom color overrides (future)
+	} `json:"theme,omitempty"`
 }
 // Loader manages settings loading and CLAUDE.md injection.
 type Loader struct {
@@ -341,6 +348,20 @@ func mergeInto(dst *Settings, src Settings) {
 			dst.MCPServers = make(map[string]MCPServerConfig)
 		}
 		dst.MCPServers[k] = v
+	}
+
+	// Theme (last-wins for mode/palette; colors map is merged so later layers add/override keys)
+	if src.Theme.Mode != "" {
+		dst.Theme.Mode = src.Theme.Mode
+	}
+	if src.Theme.Palette != "" {
+		dst.Theme.Palette = src.Theme.Palette
+	}
+	for k, v := range src.Theme.Colors {
+		if dst.Theme.Colors == nil {
+			dst.Theme.Colors = make(map[string]string)
+		}
+		dst.Theme.Colors[k] = v
 	}
 }
 

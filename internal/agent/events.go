@@ -19,6 +19,14 @@ type Event interface {
 
 // TextDeltaEvent carries a streaming text fragment from the model.
 // These arrive rapidly and should be appended to the current output buffer.
+//
+// Remediation #9 note (from streaming quality investigation):
+// Higher-quality output can be achieved with server-side (or agent-loop)
+// sentence / semantic buffering before emitting deltas. This TUI client
+// only ever sees the token stream it is given via TextDeltaEvent.
+// Any such buffering would live in internal/agent (the inference streaming
+// loop in inference.go) or earlier in the gateway/inference layer, not here.
+// Tracked as a complementary future improvement.
 type TextDeltaEvent struct {
 	Text string
 }

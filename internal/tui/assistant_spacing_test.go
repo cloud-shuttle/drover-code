@@ -3,11 +3,13 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	liveregion "github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
 )
 
 func TestSoftenAssistantParagraphBreaks(t *testing.T) {
 	in := "check the Foo struct:Now let me read bar.go:Let me see:The end"
-	out := softenAssistantParagraphBreaks(in)
+	out := liveregion.SoftenAssistantParagraphBreaks(in)
 	if out == in {
 		t.Fatal("expected insertions")
 	}

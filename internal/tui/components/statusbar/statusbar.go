@@ -19,8 +19,10 @@ type StatusBar struct {
 	AgentBusy    bool
 	Width        int
 
-	RiskLevel  string // "normal", "caution", "high"
-	RiskReason string // short explanation (e.g. "editing source files")
+	RiskLevel    string // "normal", "caution", "high"
+	RiskReason   string // short explanation (e.g. "editing source files")
+	Paused       bool
+	PausedReason string // optional reason from /pause "reason"
 }
 
 // New creates a new StatusBar.
@@ -51,13 +53,26 @@ func (s *StatusBar) View() string {
 		busy = lipgloss.NewStyle().Foreground(styles.ColSuccess).Render(" ● LIVE")
 	}
 
+	paused := ""
+	if s.Paused {
+		paused = lipgloss.NewStyle().Foreground(styles.ColWarning).Render(" ⏸ PAUSED")
+		if s.PausedReason != "" {
+			short := s.PausedReason
+			if len(short) > 22 {
+				short = short[:19] + "…"
+			}
+			paused += " " + lipgloss.NewStyle().Foreground(styles.ColMuted).Render("(" + short + ")")
+		}
+	}
+
 	risk := s.renderRisk()
 
-	right := fmt.Sprintf("%s  in:%d  out:%d%s",
+	right := fmt.Sprintf("%s  in:%d  out:%d%s%s",
 		busy,
 		s.InputTokens,
 		s.OutputTokens,
 		risk,
+		paused,
 	)
 
 	used := lipgloss.Width(left) + lipgloss.Width(right)

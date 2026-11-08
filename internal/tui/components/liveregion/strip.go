@@ -1,8 +1,17 @@
-package tui
+package liveregion
 
 import "strings"
 
-func stripCursorPositionReports(s string) string {
+// The strip* functions perform defensive cleanup of terminal control sequences,
+// OSC responses, bare RGB fragments, and other junk that sometimes leaks into
+// LLM token streams (especially over certain transports or when the model
+// hallucinates terminal output).
+//
+// Remediation #7 context: These now live inside the liveregion package so that
+// the full streaming pipeline (sanitization + buffering + preview) can be
+// encapsulated without the parent model having to know the details.
+
+func StripCursorPositionReports(s string) string {
 	for {
 		changed := false
 		if idx := strings.Index(s, "\x1b["); idx >= 0 {
@@ -59,16 +68,46 @@ func scanBackslashBracketReportEnd(s string, start int) int {
 	return -1
 }
 
-func stripTerminalOSCResponses(s string) string {
+func StripTerminalOSCResponses(s string) string {
 	for {
+		// Detect common variants of terminal color query responses (OSC 11).
+		// Terminals (and some TUI color probing) reply with things like:
+		//   ]11;rgb:RRRR/GGGG/BBBB
+		//   ]11rgb:RRRR/GGGG/BBBB
+		// These can arrive split across reads and leak into the focused textarea
+		// on startup, producing garbage like the "]11rgb:2828/..." the user saw.
 		i := strings.Index(s, "]11;rgb:")
+		if i < 0 {
+			i = strings.Index(s, "]11rgb:")
+		}
+		if i < 0 {
+			i = strings.Index(s, "11;rgb:")
+		}
+		if i < 0 {
+			i = strings.Index(s, "11rgb:")
+		}
+		if i < 0 {
+			i = strings.Index(s, "11;rg")
+		}
+		if i < 0 {
+			i = strings.Index(s, "11rg")
+		}
+
 		if i < 0 {
 			return s
 		}
-		j := i + len("]11;rgb:")
+
+		// If we landed on a fragment, try to include a preceding ']' if present.
+		start := i
+		if s[start] == '1' && start > 0 && s[start-1] == ']' {
+			start--
+		}
+
+		// Consume until a plausible OSC terminator or whitespace.
+		j := start + 1
 		for j < len(s) {
 			switch s[j] {
-			case '\a', 0x1b, '\\', '\n', '\r':
+			case '\a', 0x1b, '\\', '\n', '\r', ' ':
 				if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' {
 					j += 2
 				} else {
@@ -83,11 +122,11 @@ func stripTerminalOSCResponses(s string) string {
 		if j > len(s) {
 			j = len(s)
 		}
-		s = s[:i] + s[j:]
+		s = s[:start] + s[j:]
 	}
 }
 
-func stripStandaloneBackslashLines(s string) string {
+func StripStandaloneBackslashLines(s string) string {
 	for {
 		orig := s
 		s = strings.TrimPrefix(s, "\\\n")
@@ -99,7 +138,7 @@ func stripStandaloneBackslashLines(s string) string {
 	}
 }
 
-func stripBareRGBTriplets(s string) string {
+func StripBareRGBTriplets(s string) string {
 	return stripBareNumericSlashFragments(s)
 }
 

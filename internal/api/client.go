@@ -56,12 +56,21 @@ func minInt(a, b int) int {
 	return b
 }
 
-// Client sends requests to the Anthropic Messages API.
-// Use NewClient to construct one.
+// Protocol selects the LLM wire format used by Client.
+type Protocol string
+
+const (
+	ProtocolAnthropic Protocol = "anthropic"
+	ProtocolOpenAI    Protocol = "openai"
+)
+
+// Client sends requests to an LLM API (Anthropic Messages or OpenAI Chat Completions).
+// Use NewClient or NewOpenAIClient / NewClientFromEnv to construct one.
 type Client struct {
 	apiKey       string
 	baseURL      string
 	model        string
+	protocol     Protocol
 	httpClient   *http.Client
 	extraHeaders map[string]string
 }
@@ -96,15 +105,53 @@ func (c *Client) SetBaseURL(baseURL string) {
 // model should be the full Anthropic Messages API model identifier.
 func NewClient(apiKey, model string) *Client {
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: defaultBaseURL,
-		model:   model,
+		apiKey:   apiKey,
+		baseURL:  defaultBaseURL,
+		model:    model,
+		protocol: ProtocolAnthropic,
 		// Generous timeout: streaming responses for large tasks can be long.
 		httpClient: &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
-// Model returns the configured Anthropic model identifier.
+// NewOpenAIClient creates a Client that speaks OpenAI Chat Completions
+// (`POST {base}/v1/chat/completions`, Authorization: Bearer).
+func NewOpenAIClient(apiKey, model string) *Client {
+	return &Client{
+		apiKey:     apiKey,
+		baseURL:    defaultOpenAIBaseURL,
+		model:      model,
+		protocol:   ProtocolOpenAI,
+		httpClient: &http.Client{Timeout: 10 * time.Minute},
+	}
+}
+
+// Protocol returns the configured wire format.
+func (c *Client) Protocol() Protocol {
+	if c == nil || c.protocol == "" {
+		return ProtocolAnthropic
+	}
+	return c.protocol
+}
+
+// WithModel returns a shallow copy that uses a different model id
+// (same protocol, base URL, key, and extra headers).
+func (c *Client) WithModel(model string) *Client {
+	if c == nil || strings.TrimSpace(model) == "" {
+		return c
+	}
+	cp := *c
+	cp.model = model
+	if len(c.extraHeaders) > 0 {
+		cp.extraHeaders = make(map[string]string, len(c.extraHeaders))
+		for k, v := range c.extraHeaders {
+			cp.extraHeaders[k] = v
+		}
+	}
+	return &cp
+}
+
+// Model returns the configured model identifier.
 func (c *Client) Model() string { return c.model }
 
 // StreamRequest carries the parameters for a single API call.
@@ -136,15 +183,14 @@ func (c *Client) StreamMessage(ctx context.Context, req StreamRequest) (*Stream,
 	for attempt := 0; ; attempt++ {
 		httpReq, err := http.NewRequestWithContext(
 			ctx, http.MethodPost,
-			c.baseURL+"/v1/messages",
+			c.streamURL(),
 			bytes.NewReader(body),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("create http request: %w", err)
 		}
 
-		httpReq.Header.Set("x-api-key", c.apiKey)
-		httpReq.Header.Set("anthropic-version", anthropicVersion)
+		c.applyAuthHeaders(httpReq)
 		httpReq.Header.Set("content-type", "application/json")
 		httpReq.Header.Set("accept", "text/event-stream")
 		c.applyExtraHeaders(httpReq)
@@ -174,12 +220,34 @@ func (c *Client) StreamMessage(ctx context.Context, req StreamRequest) (*Stream,
 			return nil, fmt.Errorf("api error %d: %s", resp.StatusCode, errBody)
 		}
 
+		if c.Protocol() == ProtocolOpenAI {
+			return newOpenAITranslatedStream(resp.Body), nil
+		}
 		return newStream(resp.Body), nil
 	}
 }
 
+func (c *Client) streamURL() string {
+	if c.Protocol() == ProtocolOpenAI {
+		return c.chatCompletionsURL()
+	}
+	return c.baseURL + "/v1/messages"
+}
+
+func (c *Client) applyAuthHeaders(req *http.Request) {
+	if c.Protocol() == ProtocolOpenAI {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		return
+	}
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", anthropicVersion)
+}
+
 // buildRequestBody marshals the request into the JSON wire format.
 func (c *Client) buildRequestBody(req StreamRequest) ([]byte, error) {
+	if c.Protocol() == ProtocolOpenAI {
+		return buildOpenAIRequestBody(c.model, req)
+	}
 	body := map[string]any{
 		"model":      c.model,
 		"max_tokens": req.MaxTokens,

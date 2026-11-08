@@ -5,7 +5,9 @@ package telemetry
 
 import (
 	"context"
+	"os"
 	stdlog "log"
+	"strings"
 
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/log/global"
@@ -28,6 +30,15 @@ import (
 //
 // The returned func is always safe to defer-call (even if it does nothing).
 func SetupOTELLogger(ctx context.Context) func(context.Context) error {
+	// Only attempt real OTLP log export if the user has explicitly configured an endpoint.
+	// This prevents noisy "connection refused" spam to stderr when running the TUI
+	// interactively with no collector present (the common case).
+	endpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if endpoint == "" {
+		// Best-effort no-op: Warden will fall back to its other telemetry paths (ClickHouse + Langfuse).
+		return func(context.Context) error { return nil }
+	}
+
 	res, err := resource.New(ctx,
 		resource.WithFromEnv(),
 		resource.WithProcess(),
@@ -35,7 +46,6 @@ func SetupOTELLogger(ctx context.Context) func(context.Context) error {
 		resource.WithAttributes(
 			semconv.ServiceName("drover-code"),
 			semconv.ServiceVersion("dev"),
-			// Service instance / job specifics can be added via OTEL_RESOURCE_ATTRIBUTES or later per-span
 		),
 	)
 	if err != nil {
@@ -56,6 +66,6 @@ func SetupOTELLogger(ctx context.Context) func(context.Context) error {
 	)
 
 	global.SetLoggerProvider(lp)
-	stdlog.Printf("otel: LoggerProvider initialized; drover.warden OTEL logs enabled")
+	stdlog.Printf("otel: LoggerProvider initialized; drover.warden OTEL logs enabled (endpoint=%s)", endpoint)
 	return lp.Shutdown
 }

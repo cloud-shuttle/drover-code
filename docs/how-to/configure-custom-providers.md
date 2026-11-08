@@ -1,6 +1,6 @@
 ---
 title: Configure custom LLM providers
-description: Point Drover Code at Anthropic-compatible API endpoints and provider configurations.
+description: Point Drover Code at Anthropic-compatible or OpenAI-compatible API endpoints (including self-hosted SGLang).
 product: drover-code
 audience: platform-operator
 doc_type: how-to
@@ -9,9 +9,20 @@ topics:
 surface: repo-docs
 ---
 
+# Custom LLM providers
+
+Drover Code supports two wire formats:
+
+| Protocol | Env trigger | Request path | Auth |
+|----------|-------------|--------------|------|
+| **Anthropic Messages** (default) | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | `{BASE}/v1/messages` | `x-api-key` |
+| **OpenAI Chat Completions** | `OPENAI_BASE_URL` or `DROVER_LLM_PROVIDER=openai` | `{BASE}/v1/chat/completions` | `Authorization: Bearer` |
+
+The agent loop, tools, TUI, headless, webhook, and coordinator all share the same conversation types. The OpenAI path translates messages and tool calls to Chat Completions (including SGLang `--tool-call-parser deepseekv4`).
+
 # Anthropic-compatible API providers
 
-drover-code speaks the **Anthropic Messages API**: `POST …/v1/messages`, Server-Sent Events, tool use in the same shape as Anthropic’s API. Any vendor that exposes that wire format can be used by pointing the client at their base URL and supplying their API key.
+drover-code’s default protocol is the **Anthropic Messages API**. Any vendor that exposes that wire format can be used by pointing the client at their base URL and supplying their API key.
 
 Official Anthropic needs only `ANTHROPIC_API_KEY` (default base URL is `https://api.anthropic.com`). **Alternate providers** need an explicit base URL and sometimes a different env var for the key (see below).
 
@@ -60,11 +71,51 @@ export ANTHROPIC_MODEL=glm-4.5
 ./drover-code
 ```
 
-Do **not** point `ANTHROPIC_BASE_URL` at a non-Anthropic API (for example some older “PaaS v4” OpenAI-style URLs): the path must resolve to **`/v1/messages`** on the Anthropic wire format.
+Do **not** point `ANTHROPIC_BASE_URL` at a non-Anthropic API (for example some older “PaaS v4” OpenAI-style URLs): the path must resolve to **`/v1/messages`** on the Anthropic wire format. For OpenAI-style hosts, use the OpenAI variables below.
+
+## OpenAI-compatible APIs (SGLang, DeepSeek-V4-Flash)
+
+Use this when the server implements `POST /v1/chat/completions` with Bearer auth — including the self-hosted DeepSeek-V4-Flash SGLang stack (`https://llm.drover.sh/v1`).
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_BASE_URL` | Yes (or set `DROVER_LLM_PROVIDER`) | API root. `https://llm.drover.sh/v1` and `https://llm.drover.sh` both resolve to `/v1/chat/completions`. |
+| `OPENAI_API_KEY` | One of key vars | Bearer token. |
+| `SGLANG_API_KEY` | One of key vars | Used when `OPENAI_API_KEY` is empty (matches the Akamai `config/dsv4.env` kit). |
+| `OPENAI_MODEL` | Recommended | Served model id. Falls back to `SERVED_MODEL_NAME` if set. |
+| `DROVER_LLM_PROVIDER` | Optional | `openai`, `openai-compat`, or `sglang` forces this protocol. `anthropic` forces Messages even if `OPENAI_BASE_URL` is set. |
+
+Selecting the OpenAI protocol: set `DROVER_LLM_PROVIDER=openai`, **or** set `OPENAI_BASE_URL`. Then at least one of `OPENAI_API_KEY` / `SGLANG_API_KEY` must be non-empty.
+
+### DeepSeek-V4-Flash on SGLang
+
+After `source config/dsv4.env` from the deploy kit:
+
+```bash
+source /path/to/akamai/config/dsv4.env
+export OPENAI_BASE_URL=https://llm.drover.sh/v1
+export OPENAI_API_KEY="$SGLANG_API_KEY"
+export OPENAI_MODEL="${SERVED_MODEL_NAME:-deepseek-v4-flash}"
+./drover-code
+```
+
+Equivalent (key alias only):
+
+```bash
+export DROVER_LLM_PROVIDER=openai
+export OPENAI_BASE_URL=https://llm.drover.sh/v1
+export SGLANG_API_KEY=your-sglang-api-key
+export OPENAI_MODEL=deepseek-v4-flash
+./drover-code
+```
+
+The SGLang service should be started with an OpenAI-compatible tool parser (the deploy kit uses `--tool-call-parser deepseekv4` and `--reasoning-parser deepseek-v4`). Drover Code sends tools as OpenAI `type: function` entries and maps streamed `tool_calls` back into the agent loop.
+
+`max_tokens` is sent as in the OpenAI spec (same field the smoke `curl` uses). Reasoning tokens from the parser are not stored as assistant text.
 
 ## Webhook mode
 
-`./drover-code webhook` uses the same variables. Set `ANTHROPIC_BASE_URL` and key env vars before starting the server.
+`./drover-code webhook` uses the same provider variables as the TUI and headless modes.
 
 ## Live evals
 
@@ -72,9 +123,10 @@ The `evals` package accepts `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` and ho
 
 ## Troubleshooting
 
-1. **401 /403** — Wrong key, wrong project, or gateway expects a different header than `x-api-key`.
-2. **404 on `/v1/messages`** — `ANTHROPIC_BASE_URL` is wrong: the Messages API path must be `{base}/v1/messages`.
-3. **Stream or tool errors** — Provider may diverge slightly from Anthropic’s SSE or tool schema; compare with vendor docs or capture a minimal `curl` against the same base URL.
+1. **401 /403** — Wrong key, or the host expects a different header (`x-api-key` vs `Authorization: Bearer`). OpenAI-compatible hosts need Bearer.
+2. **404 on `/v1/messages`** — You pointed `ANTHROPIC_BASE_URL` at an OpenAI-style server. Set `OPENAI_BASE_URL` instead.
+3. **404 on `/v1/chat/completions`** — `OPENAI_BASE_URL` is wrong. For `https://llm.drover.sh/v1/chat/completions`, use `OPENAI_BASE_URL=https://llm.drover.sh/v1` (or the host without `/v1`).
+4. **Stream or tool errors** — Provider may diverge from Anthropic SSE or OpenAI `tool_calls`; compare with a minimal `curl` against the same base URL.
 
 ## Adding another vendor
 

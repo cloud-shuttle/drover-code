@@ -168,19 +168,23 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		_ = outcomesignal.WriteBYOCSpanIfConfigured(traceID, outcomesignal.FromRunError(runErr), input, finalOutput)
 	}()
 
-	l.convo.Append(api.UserMessage(input))
+	isResume := input == ""
+	if !isResume {
+		l.convo.Append(api.UserMessage(input))
+	}
 
-	// Input Guard (Warden) — run on the latest user message for prompt injection / policy violations
-	lastUser := input
-	idec := warden.CheckInput(ctx, &droverwarden.GuardRequest{
-		TenantID: os.Getenv("DROVER_TENANT_ID"),
-		Input:    lastUser,
-		Context: map[string]any{
-			"agent_id": os.Getenv("DROVER_AGENT_ID"),
-		},
-	})
-	if !idec.Allowed {
-		return fmt.Errorf("input blocked by Warden: %s", idec.Result.Reason)
+	// Input Guard (Warden) — only for new user input, not for resume/continuation.
+	if !isResume {
+		idec := warden.CheckInput(ctx, &droverwarden.GuardRequest{
+			TenantID: os.Getenv("DROVER_TENANT_ID"),
+			Input:    input,
+			Context: map[string]any{
+				"agent_id": os.Getenv("DROVER_AGENT_ID"),
+			},
+		})
+		if !idec.Allowed {
+			return fmt.Errorf("input blocked by Warden: %s", idec.Result.Reason)
+		}
 	}
 
 	var wg sync.WaitGroup

@@ -101,11 +101,22 @@ func main() {
 		os.Exit(2)
 	}
 
-	apiKey := requireAnthropicAPIKey()
 	workDir := mustGetwd()
 
 	cfg := loadConfig(workDir)
 	settings := cfg.Get()
+
+	// Provide a persistence function for theme changes (writes back to project settings).
+	// This enables "last-used theme per project" (saved into .claude/settings.json).
+	themeSaveFn := func(mode, palette string) error {
+		delta := config.Settings{}
+		delta.Theme.Mode = mode
+		if palette != "" {
+			delta.Theme.Palette = palette
+		}
+		return cfg.Save(delta)
+	}
+
 	if startupFlags.CoordinatorRemote {
 		settings.CoordinatorRemote = true
 	}
@@ -117,14 +128,19 @@ func main() {
 	}
 
 	modelStr := coalesce(os.Getenv("ANTHROPIC_MODEL"), settings.Model, defaultModel)
+	if api.ProviderFromEnv() == api.ProtocolOpenAI {
+		if ov := api.ModelFromEnv(api.ProtocolOpenAI); ov != "" {
+			modelStr = ov
+		}
+	}
 
 	undercoverActive := resolveUndercoverMode(settings, workDir)
 	sysPrompt := buildSystemPrompt(workDir, cfg.SystemInjection(), undercoverActive)
 
-	client := api.NewClient(apiKey, modelStr)
-	api.ApplyGatewayEnv(client)
+	client := requireLLMClient(modelStr)
 	mgr := convo.NewManagerWithSystem(sysPrompt)
 	config.ApplyConvoHeuristics(mgr, settings)
+	config.ApplyTheme(settings) // Theme System foundation
 	registry := tools.NewRegistry()
 	tools.RegisterAll(registry, workDir)
 
@@ -175,14 +191,13 @@ func main() {
 		runCoordinatorMode(ctx, client, registry, modelStr, workDir, settings, dreamWorker)
 
 	default:
-		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore, cmdExecutor)
+		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore, cmdExecutor, themeSaveFn)
 	}
 }
 
 // ── Webhook server ─────────────────────────────────────────────────────────
 
 func runWebhookServer() {
-	apiKey := requireAnthropicAPIKey()
 	ghToken := requireEnv("GITHUB_TOKEN")
 	webhookSecret := os.Getenv("GITHUB_WEBHOOK_SECRET")
 	addr := coalesce(os.Getenv("WEBHOOK_ADDR"), ":8080")
@@ -192,8 +207,13 @@ func runWebhookServer() {
 		log.Fatalf("create work dir: %v", err)
 	}
 
-	client := api.NewClient(apiKey, defaultModel)
-	api.ApplyGatewayEnv(client)
+	modelStr := coalesce(os.Getenv("ANTHROPIC_MODEL"), defaultModel)
+	if api.ProviderFromEnv() == api.ProtocolOpenAI {
+		if ov := api.ModelFromEnv(api.ProtocolOpenAI); ov != "" {
+			modelStr = ov
+		}
+	}
+	client := requireLLMClient(modelStr)
 	ghClient := github.NewClient(ghToken)
 	runner := github.NewRunner(ghClient, client, workBase)
 	srv := github.NewServer(runner, webhookSecret)
@@ -230,6 +250,7 @@ func runTUI(
 	dw *dream.Worker,
 	ds dream.Store,
 	cmdExec *commands.Executor,
+	themeSaveFn func(mode, palette string) error,
 ) {
 	if ds != nil {
 		if inj := dream.BuildInjection(ds, 5); inj != "" {
@@ -240,7 +261,7 @@ func runTUI(
 		dw.Start(ctx)
 	}
 
-	prog := tui.NewProgram(ctx, client, mgr, registry, modelStr, settings, workDir, cmdExec)
+	prog := tui.NewProgram(ctx, client, mgr, registry, modelStr, settings, workDir, cmdExec, themeSaveFn)
 	if err := prog.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -449,9 +470,7 @@ func runHeadless(
 				input = expanded
 				// Handle model/agent overrides if set
 				if cmdDef.Model != "" {
-					loopClient := api.NewClient(anthropicAPIKey(), cmdDef.Model)
-					api.ApplyGatewayEnv(loopClient)
-					loop.SetDriver(agent.NewAnthropicInferenceDriver(loopClient))
+					loop.SetDriver(agent.NewAnthropicInferenceDriver(client.WithModel(cmdDef.Model)))
 				}
 			} else if !strings.Contains(err.Error(), "not found") {
 				if strings.Contains(err.Error(), "Drover Guard") {

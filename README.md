@@ -52,8 +52,7 @@ Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML fro
 ## Requirements
 
 - Go 1.22+
-- Anthropic-compatible API access: `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` (see [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md))
-- Optional: `ANTHROPIC_BASE_URL` for non-Anthropic gateways (same doc)
+- LLM API access — Anthropic (`ANTHROPIC_API_KEY`) **or** OpenAI-compatible Chat Completions (`OPENAI_BASE_URL` + `OPENAI_API_KEY` / `SGLANG_API_KEY`). See [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md).
 - `git` on `PATH` if you use git tools
 
 ## Build
@@ -117,9 +116,9 @@ export ANTHROPIC_MODEL=claude-haiku-4-5-20251001
 
 or `"model"` in `~/.claude/settings.json` or `.claude/settings.json`.
 
-## Other LLM providers (Moonshot, GLM, …)
+## Other LLM providers (Moonshot, GLM, SGLang / DeepSeek, …)
 
-drover-code targets the **Anthropic Messages API** wire format. Gateways that implement the same protocol can be used with `ANTHROPIC_BASE_URL` and the provider’s key.
+drover-code speaks **Anthropic Messages** by default, and **OpenAI Chat Completions** when `OPENAI_BASE_URL` or `DROVER_LLM_PROVIDER=openai` is set (self-hosted SGLang, DeepSeek-V4-Flash, etc.).
 
 **Setup, examples, and troubleshooting:** [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md)
 

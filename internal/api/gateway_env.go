@@ -13,10 +13,16 @@ const (
 )
 
 func gatewayMode() bool {
-	return strings.TrimSpace(os.Getenv(EnvAnthropicBaseURL)) != ""
+	return strings.TrimSpace(os.Getenv(EnvOpenAIBaseURL)) != "" || strings.TrimSpace(os.Getenv(EnvAnthropicBaseURL)) != ""
 }
 
 func virtualKeyFromEnv() string {
+	if ProviderFromEnv() == ProtocolOpenAI {
+		if v := strings.TrimSpace(os.Getenv(EnvOpenAIAPIKey)); v != "" {
+			return v
+		}
+		return strings.TrimSpace(os.Getenv(EnvSGLANGAPIKey))
+	}
 	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
 		return v
 	}
@@ -48,7 +54,11 @@ func ApplyGatewayEnv(c *Client) {
 	if c == nil {
 		return
 	}
-	if u := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); u != "" {
+	if c.Protocol() == ProtocolOpenAI {
+		if u := strings.TrimSpace(os.Getenv(EnvOpenAIBaseURL)); u != "" {
+			c.SetBaseURL(u)
+		}
+	} else if u := strings.TrimSpace(os.Getenv(EnvAnthropicBaseURL)); u != "" {
 		c.SetBaseURL(u)
 	}
 	if h := GatewayRequestHeadersFromEnv(); len(h) > 0 {

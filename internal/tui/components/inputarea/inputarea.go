@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
 	"github.com/cloudshuttle/drover-code/internal/tui/styles"
 )
 
@@ -36,6 +37,10 @@ type InputArea struct {
 
 	Width        int
 	inputFocused bool
+
+	// Paused state for richer visual feedback (banner when agent is paused via /pause)
+	Paused       bool
+	PausedReason string
 }
 
 // slashCommand is the internal representation of a registered /command.
@@ -55,10 +60,12 @@ func New() *InputArea {
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
 	ta.BlurredStyle.Base = lipgloss.NewStyle()
 
-	return &InputArea{
+	ia := &InputArea{
 		Textarea:     ta,
 		inputFocused: true,
 	}
+	ia.sanitizeValue() // defensive: clean any garbage that arrived during early terminal probing
+	return ia
 }
 
 // RegisterSlashCommands replaces the list of available /commands used for autocomplete
@@ -136,6 +143,7 @@ func (ia *InputArea) QueuedMessages() []string {
 // UpdateAutocomplete examines the current textarea value and decides whether to show
 // the autocomplete dropdown. Called after most key events.
 func (ia *InputArea) UpdateAutocomplete() {
+	ia.sanitizeValue()
 	val := ia.Textarea.Value()
 	if strings.HasPrefix(val, "/") && !strings.Contains(val, " ") {
 		ia.showAuto = true
@@ -144,6 +152,30 @@ func (ia *InputArea) UpdateAutocomplete() {
 		ia.showAuto = false
 	}
 	ia.rebuildSuggestions()
+}
+
+// sanitizeValue removes terminal control sequences (OSC color queries, CSI reports, etc.)
+// that can leak into the input stream from terminal responses. This is the primary
+// defense against garbage like "]11;rgb:..." or fragments appearing in the prompt.
+func (ia *InputArea) sanitizeValue() {
+	v := ia.Textarea.Value()
+	if v == "" {
+		return
+	}
+	sanitized := v
+
+	// Always attempt to strip known problematic terminal responses.
+	// We no longer guard on exact prefixes so we catch fragments that arrive
+	// split across reads (common with OSC color queries on startup).
+	sanitized = liveregion.StripTerminalOSCResponses(sanitized)
+	sanitized = liveregion.StripCursorPositionReports(sanitized)
+	sanitized = liveregion.StripStandaloneBackslashLines(sanitized)
+	sanitized = liveregion.StripBareRGBTriplets(sanitized)
+
+	if sanitized != v {
+		ia.Textarea.SetValue(sanitized)
+		ia.Textarea.CursorEnd()
+	}
 }
 
 func (ia *InputArea) rebuildSuggestions() {
@@ -212,9 +244,12 @@ func (ia *InputArea) Value() string {
 	return ia.Textarea.Value()
 }
 
-// SetValue replaces the textarea content.
+// SetValue replaces the textarea content. It also sanitizes to defend against
+// terminal OSC/CSI responses leaking into the input (common on startup with
+// certain terminals and color probing).
 func (ia *InputArea) SetValue(v string) {
 	ia.Textarea.SetValue(v)
+	ia.sanitizeValue()
 }
 
 // Reset clears the textarea.
@@ -228,9 +263,12 @@ func (ia *InputArea) CursorEnd() {
 }
 
 // Update forwards a tea.Msg (primarily key and paste events) to the inner textarea and returns the updated component.
+// After delegation we sanitize to remove any terminal response garbage that may have arrived
+// in the input stream (e.g. OSC color query replies like "]11;rgb:...").
 func (ia *InputArea) Update(msg tea.Msg) (*InputArea, tea.Cmd) {
 	var cmd tea.Cmd
 	ia.Textarea, cmd = ia.Textarea.Update(msg)
+	ia.sanitizeValue()
 	return ia, cmd
 }
 
@@ -249,10 +287,30 @@ func (ia *InputArea) View() string {
 
 	input := border.Width(ia.Width - 2).Render(ia.Textarea.View())
 
+	banners := []string{}
+
+	if ia.Paused {
+		pausedText := "⏸ Paused"
+		if ia.PausedReason != "" {
+			short := ia.PausedReason
+			if len(short) > 30 {
+				short = short[:27] + "…"
+			}
+			pausedText += " (" + short + ")"
+		}
+		pausedText += " — /resume or new input to continue"
+		pausedBanner := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).MarginLeft(2).Render(pausedText)
+		banners = append(banners, pausedBanner)
+	}
+
 	if len(ia.MessageQueue) > 0 {
 		queuedText := fmt.Sprintf("⏳ %d message(s) queued...", len(ia.MessageQueue))
 		queuedBanner := lipgloss.NewStyle().Foreground(lipgloss.Color("204")).MarginLeft(2).Render(queuedText)
-		input = lipgloss.JoinVertical(lipgloss.Left, queuedBanner, input)
+		banners = append(banners, queuedBanner)
+	}
+
+	if len(banners) > 0 {
+		input = lipgloss.JoinVertical(lipgloss.Left, append(banners, input)...)
 	}
 
 	if ia.showAuto {
@@ -317,3 +375,28 @@ var (
 				Foreground(styles.ColAccent).
 				Bold(true)
 )
+
+func init() {
+	styles.RegisterThemeChangeListener(rebuildStyles)
+}
+
+// rebuildStyles re-creates the input/autocomplete styles from current Col*.
+// Enables live application of Settings.Theme.Colors custom overrides.
+func rebuildStyles() {
+	styleInputBorder = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(styles.ColBorder)
+
+	styleInputBorderFocused = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(styles.ColAccent)
+
+	styleAutoItem = lipgloss.NewStyle().
+			PaddingLeft(2).
+			Foreground(styles.ColMuted)
+
+	styleAutoItemSelected = lipgloss.NewStyle().
+				PaddingLeft(2).
+				Foreground(styles.ColAccent).
+				Bold(true)
+}

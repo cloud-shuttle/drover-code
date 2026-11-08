@@ -29,6 +29,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/tui/components/inputarea"
 	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
 	"github.com/cloudshuttle/drover-code/internal/tui/core"
+	"github.com/cloudshuttle/drover-code/internal/tui/styles"
 )
 
 type slashItem struct {
@@ -42,7 +43,12 @@ type RunFunc func(input string) tea.Cmd
 type Model struct {
 	width, height int
 
-	// streamBuf is retained for the final Glamour render of assistant turns (used in DoneEvent).
+	// streamBuf is retained **only** for the final Glamour render of assistant turns (used in DoneEvent).
+	// It must never be used for the live preview.
+	//
+	// The live streaming preview lives in a completely separate buffer inside LiveRegion
+	// (see liveregion.livePreview) so it can be aggressively post-processed, truncated,
+	// and buffered without affecting the committed history content.
 	// LiveRegion owns the live preview + tool activity.
 	// HistoryView owns conversation history rendering.
 	streamBuf strings.Builder
@@ -109,10 +115,12 @@ type Model struct {
 	maxGlamourRunes   int
 	maxHistoryDisplay int
 
-	runFunc   RunFunc
-	runCancel context.CancelFunc
-	compactFn func() error
-	convoMgr  *convo.Manager
+	runFunc         RunFunc
+	runCancel       context.CancelFunc
+	lastPauseReason string // optional reason from /pause "reason"
+	compactFn       func() error
+	convoMgr        *convo.Manager
+	themeSaveFn     func(mode, palette string) error // for persisting theme changes
 }
 
 // SetRunCancel allows injecting the context cancellation function for the current run
@@ -289,11 +297,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case tea.KeyCtrlK:
-			if !m.agentBusy {
-				cmds := m.buildCommandPaletteCommands()
-				m.commandPaletteModel = commandpalette.NewWithCommands(cmds, m.width, m.height)
-				m.showingCommandPalette = true
-			}
+			// Allow palette even while busy so "pause" (and other safe actions) are discoverable
+			// via Ctrl+K during a long-running agent turn.
+			cmds := m.buildCommandPaletteCommands()
+			m.commandPaletteModel = commandpalette.NewWithCommands(cmds, m.width, m.height)
+			m.showingCommandPalette = true
 			return m, nil
 		case tea.KeyEnter, tea.KeyCtrlJ:
 			input := strings.TrimSpace(m.InputArea.Value())
@@ -381,29 +389,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
-		// Forward to InputArea (now owns the textarea and autocomplete state)
+		// Forward to InputArea (now owns the textarea and autocomplete state).
+		// InputArea performs its own sanitization on every Update to strip terminal
+		// OSC responses, CSI reports, and other garbage that can leak from the pty
+		// (especially "]11;rgb:..." color query replies on startup).
 		_, taCmd := m.InputArea.Update(msg)
 		cmds = append(cmds, taCmd)
 
-		if v := m.InputArea.Value(); v != "" {
-			sanitized := v
-			if strings.Contains(sanitized, "]11;rgb:") {
-				sanitized = stripTerminalOSCResponses(sanitized)
-			}
-			if strings.Contains(sanitized, "\x1b[") || strings.Contains(sanitized, "\\[") {
-				sanitized = stripCursorPositionReports(sanitized)
-			}
-			if strings.Contains(sanitized, "\n\\\n") || strings.HasPrefix(sanitized, "\\\n") {
-				sanitized = stripStandaloneBackslashLines(sanitized)
-			}
-			if strings.Contains(sanitized, "/") {
-				sanitized = stripBareRGBTriplets(sanitized)
-			}
-			if sanitized != v {
-				m.InputArea.SetValue(sanitized)
-				m.InputArea.CursorEnd()
-			}
-		}
 		m.InputArea.UpdateAutocomplete()
 		return m, tea.Batch(cmds...)
 
@@ -424,10 +416,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commandPaletteModel = nil
 
 		if msg.ActionKey != "" {
-			// First check for externally registered handlers
+			// First check for externally registered handlers (exact match)
 			if handler, ok := m.paletteActionHandlers[msg.ActionKey]; ok && handler != nil {
 				if cmd := handler(msg.ActionKey); cmd != nil {
 					return m, cmd
+				}
+			}
+			// Support prefix-registered handlers (e.g. Register "theme:" to catch "theme:default:dark")
+			for regKey, h := range m.paletteActionHandlers {
+				if regKey != "" && strings.HasSuffix(regKey, ":") && strings.HasPrefix(msg.ActionKey, regKey) {
+					if cmd := h(msg.ActionKey); cmd != nil {
+						return m, cmd
+					}
+					break
 				}
 			}
 			return m, m.executePaletteAction(msg.ActionKey)
@@ -456,10 +457,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			if errors.Is(msg.err, context.Canceled) {
 				m.lastError = "Agent paused by user."
+				reasonNote := ""
+				pausedReasonForBar := m.lastPauseReason
+				if m.lastPauseReason != "" {
+					reasonNote = ": " + m.lastPauseReason
+					m.lastPauseReason = "" // consume for note
+				}
 				m.HistoryView.AppendTurn(core.RenderedTurn{
 					Role:    "system",
-					Content: "(/pause) Agent interrupted. Waiting for new instructions...",
+					Content: fmt.Sprintf("(/pause%s) Agent interrupted. Waiting for new instructions...", reasonNote),
 				})
+				if m.StatusBar != nil {
+					m.StatusBar.Paused = true
+					m.StatusBar.PausedReason = pausedReasonForBar
+				}
 			} else {
 				m.lastError = msg.err.Error()
 
@@ -531,17 +542,23 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.TextDeltaEvent:
 		m.streamBuf.WriteString(e.Text)
 
-		// LiveRegion is the sole owner of live streaming preview
+		// dcode / remediation #7: LiveRegion (via AppendDelta) now fully owns
+		// incremental sanitization + tail context + preview buffering + throttling.
+		// Model only writes to the final streamBuf (for DoneEvent Glamour render)
+		// and tells the live component about the raw delta.
 		if m.Live != nil {
-			preview := stripCursorPositionReports(m.streamBuf.String())
-			preview = stripTerminalOSCResponses(preview)
 			m.Live.Streaming = true
-			m.Live.StreamLines = preview
+			m.Live.AppendDelta(e.Text)
 		}
 
 		m.scrollToBottom()
 
 	case agent.ToolStartEvent:
+		// Flush any pending assistant text before showing tool activity
+		if m.Live != nil {
+			m.Live.ForceFlushPending()
+		}
+
 		// LiveRegion is the sole owner of active tool spinners
 		ts := toolspinner.New(e.Name, e.InputSummary)
 		m.Live.ActiveTools[e.CallIndex] = ts
@@ -661,6 +678,11 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 
 		m.streamBuf.Reset()
 
+		// Make sure any last pending streaming tokens are flushed before we clear the live area
+		if m.Live != nil {
+			m.Live.ForceFlushPending()
+		}
+
 		m.Live.Streaming = false
 		m.agentBusy = false
 
@@ -669,8 +691,7 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 		}
 
 		// LiveRegion is the sole owner of live state
-		m.Live.Streaming = false
-		m.Live.StreamLines = ""
+		m.Live.ResetLiveStreaming()
 		m.Live.ActiveTools = make(map[int]*toolspinner.ToolSpinner)
 		m.Live.ToolOrder = nil
 		m.Live.CompletedTools = nil
@@ -695,7 +716,7 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 
 		// LiveRegion is the sole owner of live state
 		m.Live.Streaming = false
-		m.Live.StreamLines = ""
+		m.Live.ResetLiveStreaming()
 		m.Live.ActiveTools = make(map[int]*toolspinner.ToolSpinner)
 		m.Live.ToolOrder = nil
 		m.Live.CompletedTools = nil
@@ -752,6 +773,12 @@ func (m *Model) submitInput(input string) tea.Cmd {
 	m.HistoryView.GotoBottom()
 	m.agentBusy = true
 	m.Live.Streaming = true
+	// New input clears any previous paused state
+	m.lastPauseReason = ""
+	if m.StatusBar != nil {
+		m.StatusBar.Paused = false
+		m.StatusBar.PausedReason = ""
+	}
 
 	// dcode-005 consolidation: sync to components, clear previous live state on new input
 	if m.StatusBar != nil {
@@ -759,7 +786,7 @@ func (m *Model) submitInput(input string) tea.Cmd {
 	}
 	if m.Live != nil {
 		m.Live.Streaming = false
-		m.Live.StreamLines = ""
+		m.Live.ResetLiveStreaming()
 		// Optionally clear any stale active tools on new user turn (usually DoneEvent should have done this)
 		if len(m.Live.ActiveTools) > 0 {
 			m.Live.ActiveTools = make(map[int]*toolspinner.ToolSpinner)
@@ -809,6 +836,21 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 		return m.runFunc(prompt), true
 	}
 
+	if strings.HasPrefix(in, "/pause") {
+		if m.agentBusy && m.runCancel != nil {
+			rest := strings.TrimSpace(strings.TrimPrefix(in, "/pause"))
+			m.lastPauseReason = rest
+			m.runCancel()
+			m.runCancel = nil
+			m.lastError = "Agent paused by user."
+		} else if m.agentBusy {
+			m.lastError = "No active run to pause."
+		} else {
+			m.lastError = "Agent is not currently running."
+		}
+		return nil, true
+	}
+
 	switch in {
 	case "/quit", "/exit":
 		return tea.Quit, true
@@ -816,7 +858,7 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 		m.HistoryView.Clear()
 		m.streamBuf.Reset()
 		if m.Live != nil {
-			m.Live.StreamLines = ""
+			m.Live.ResetLiveStreaming()
 		}
 		m.lastError = ""
 		if m.convoMgr != nil {
@@ -843,6 +885,84 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 		}
 
 		return tea.Batch(runCompact(m.compactFn), waitForEvent(m.eventCh)), true
+	case "/resume":
+		if !m.agentBusy {
+			// Resume by continuing the agentic loop with the current conversation state.
+			// We append a subtle system note and trigger a continuation run (no new user input).
+			m.HistoryView.AppendTurn(core.RenderedTurn{
+				Role:    "system",
+				Content: "(/resume) Continuing from paused state...",
+			})
+			m.HistoryView.GotoBottom()
+			m.agentBusy = true
+			m.Live.Streaming = true
+			m.lastPauseReason = "" // clear paused state on resume
+			if m.StatusBar != nil {
+				m.StatusBar.AgentBusy = true
+				m.StatusBar.Paused = false
+				m.StatusBar.PausedReason = ""
+			}
+			if m.Live != nil {
+				m.Live.Streaming = true
+			}
+			m.scrollToBottom()
+
+			// Use a special continuation that does not append a new user message.
+			if m.runFunc != nil {
+				// The runFunc currently expects a user input string.
+				// For resume we pass a marker that the runner can detect to skip user append.
+				return m.runFunc("__internal_resume__"), true
+			}
+			m.agentBusy = false
+			m.Live.Streaming = false
+		} else {
+			m.lastError = "Agent is already running."
+		}
+		return nil, true
+	case "/theme":
+		rest := strings.TrimSpace(strings.TrimPrefix(in, "/theme"))
+		if rest == "" {
+			m.appendLocalInfo(fmt.Sprintf("Current: palette=%s mode=%s (use /theme <palette> <mode> or Ctrl+K → Theme)", styles.CurrentTheme.Name, CurrentThemeMode))
+			return nil, true
+		}
+		parts := strings.Fields(strings.ToLower(rest))
+		palette := ""
+		mode := styles.ThemeMode("")
+		for _, p := range parts {
+			switch p {
+			case "light", "dark", "auto":
+				mode = styles.ThemeMode(p)
+			default:
+				// treat as palette name (default or high-contrast etc)
+				if _, ok := styles.NamedPalettes[p]; ok {
+					palette = p
+				} else if p == "high" || p == "contrast" || p == "high-contrast" {
+					palette = "high-contrast"
+				} else {
+					palette = p // will be normalized by SetNamedPalette
+				}
+			}
+		}
+		if palette == "" && mode == "" {
+			m.appendLocalInfo("Usage: /theme [palette] [light|dark|auto]  •  e.g. /theme high-contrast dark")
+			return nil, true
+		}
+		if palette == "" {
+			palette = styles.CurrentTheme.Name
+		}
+		if mode == "" {
+			mode = styles.CurrentTheme.Mode
+			if mode == "" {
+				mode = styles.ThemeAuto
+			}
+		}
+		styles.SetNamedPalette(palette, mode)
+		m.appendLocalInfo(fmt.Sprintf("Theme: %s (%s)", palette, mode))
+		m.relayout()
+		if m.themeSaveFn != nil {
+			_ = m.themeSaveFn(string(mode), palette)
+		}
+		return nil, true
 	}
 	return nil, false
 }
@@ -892,8 +1012,10 @@ func (m *Model) tokensInfoText() string {
 
 func (m *Model) modelInfoText() string {
 	return strings.TrimSpace(fmt.Sprintf(
-		"(/model) Active model: %s\nTo change it, set ANTHROPIC_MODEL or \"model\" in .claude/settings.json and restart.",
+		"(/model) Active model: %s\nTheme: palette=%s mode=%s (Ctrl+K → Theme or /theme <palette> <mode>)\nCustom overrides: Settings.Theme.Colors in .claude/settings.json",
 		m.modelName,
+		styles.CurrentTheme.Name,
+		CurrentThemeMode,
 	))
 }
 
@@ -909,6 +1031,9 @@ func defaultSlashCommands() []slashItem {
 		{"model", "switch model"},
 		{"tokens", "show token usage"},
 		{"history", "search command history"},
+		{"pause", "pause the current agent run (optionally: /pause reason)"},
+		{"resume", "resume a previously paused agent run"},
+		{"theme", "show or set UI theme (palette + light/dark/auto); e.g. /theme high-contrast dark"},
 	}
 }
 
@@ -926,6 +1051,9 @@ func (m *Model) relayout() {
 		m.StatusBar.SetSize(m.width, 1)
 		m.StatusBar.RiskLevel = m.GuardRiskLevel
 		m.StatusBar.RiskReason = m.GuardRiskReason
+		// Paused visual state (richer feedback for /pause "reason")
+		m.StatusBar.Paused = (m.lastPauseReason != "" && !m.agentBusy)
+		m.StatusBar.PausedReason = m.lastPauseReason
 	}
 	if m.Live != nil {
 		m.Live.SetSize(m.width, 0)
@@ -937,6 +1065,9 @@ func (m *Model) relayout() {
 	}
 	if m.InputArea != nil {
 		m.InputArea.SetSize(m.width)
+		// Sync paused visual state for input area banner
+		m.InputArea.Paused = (m.lastPauseReason != "" && !m.agentBusy)
+		m.InputArea.PausedReason = m.lastPauseReason
 	}
 
 	renderWidth := m.width - 4
@@ -975,7 +1106,7 @@ func (m *Model) renderMarkdown(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	raw = softenAssistantParagraphBreaks(raw)
+	raw = liveregion.SoftenAssistantParagraphBreaks(raw)
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
 		bodyW := m.width - 6
 		if bodyW < 24 {
@@ -1004,6 +1135,8 @@ func (m *Model) renderMarkdown(raw string) string {
 func (m *Model) SetRunFunc(fn RunFunc) { m.runFunc = fn }
 
 func (m *Model) SetCompactFn(fn func() error) { m.compactFn = fn }
+
+func (m *Model) SetThemeSaveFn(fn func(mode, palette string) error) { m.themeSaveFn = fn }
 
 func (m *Model) SetConversation(mgr *convo.Manager) { m.convoMgr = mgr }
 
@@ -1162,6 +1295,27 @@ func (m *Model) buildCommandPaletteCommands() []commandpalette.Command {
 		Category:    "TUI",
 	})
 
+	// Pause/Resume as first-class semantic actions (discoverable in Ctrl+K)
+	// Conditional on state so the palette stays relevant.
+	if m.agentBusy {
+		cmds = append(cmds, commandpalette.Command{
+			Name:        "pause",
+			Description: "Pause the current agent run (Ctrl+C also works)",
+			ActionKey:   "pause",
+			Category:    "Agent",
+			RiskLevel:   "normal",
+		})
+	} else if m.lastPauseReason != "" {
+		// Offer resume if we recently had a pause (reason still set until resume)
+		cmds = append(cmds, commandpalette.Command{
+			Name:        "resume",
+			Description: "Resume a paused agent run (continues from current state)",
+			ActionKey:   "resume",
+			Category:    "Agent",
+			RiskLevel:   "normal",
+		})
+	}
+
 	return cmds
 }
 
@@ -1184,7 +1338,7 @@ func (m *Model) executePaletteAction(key string) tea.Cmd {
 		m.HistoryView.Clear()
 		m.streamBuf.Reset()
 		if m.Live != nil {
-			m.Live.StreamLines = ""
+			m.Live.ResetLiveStreaming()
 		}
 		m.lastError = ""
 		if m.convoMgr != nil {
@@ -1198,6 +1352,42 @@ func (m *Model) executePaletteAction(key string) tea.Cmd {
 
 	case "model":
 		m.appendLocalInfo(m.modelInfoText())
+		return nil
+
+	case "pause":
+		// Semantic pause from palette (no reason; use typed /pause "reason" for details)
+		if m.agentBusy && m.runCancel != nil {
+			m.runCancel()
+			m.runCancel = nil
+			m.lastError = "Agent paused."
+		}
+		return nil
+
+	case "resume":
+		if !m.agentBusy {
+			m.HistoryView.AppendTurn(core.RenderedTurn{
+				Role:    "system",
+				Content: "(/resume) Continuing from paused state...",
+			})
+			m.HistoryView.GotoBottom()
+			m.agentBusy = true
+			m.Live.Streaming = true
+			m.lastPauseReason = "" // clear paused state
+			if m.StatusBar != nil {
+				m.StatusBar.AgentBusy = true
+				m.StatusBar.Paused = false
+				m.StatusBar.PausedReason = ""
+			}
+			if m.Live != nil {
+				m.Live.Streaming = true
+			}
+			m.scrollToBottom()
+			if m.runFunc != nil {
+				return m.runFunc("__internal_resume__")
+			}
+			m.agentBusy = false
+			m.Live.Streaming = false
+		}
 		return nil
 
 	default:
