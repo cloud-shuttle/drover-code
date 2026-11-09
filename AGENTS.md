@@ -78,3 +78,17 @@ The TUI was migrated from a god-model (~956–1290 LOC in model.go) to a proper 
 A safe dual-state period was used (legacy Model fields like m.history/m.activeTools/m.permPrompt lived alongside the component fields). All mutations hit both during transition. Once every call site + test was updated, legacy paths and fields were deleted in focused consolidation passes (HistoryView first, LiveRegion second, Permission + full permission.go deletion third). InputArea kept a lighter `syncInputArea()` bridge. Snapshots and 20+ history/fuzz/e2e tests never drifted. See `design/20-week-1-tui-component-migration.md` (Reality Record section) and beads dcode-001..009 for the full story.
 
 When touching TUI code, prefer the component APIs. Update the component's isolated test + the integration snapshots. Do not re-introduce direct mutations on legacy fields that have been removed.
+
+## Harness discipline
+
+Runtime gates (mandatory even when skills are skipped):
+
+| Gate | Package |
+|------|---------|
+| Trusted delegation depth | `internal/agent/lineage.go` |
+| Alignment / SPEC checkpoint | `internal/harness` |
+| Verifier-per-PR | `internal/verification` |
+| Context occupancy budget | `internal/convo/budget.go` |
+| ADR selection | `internal/config/adr_loader.go` → `docs/adr/` |
+
+Recipes (not enforcement): `.drover/skills/grill`, `.drover/skills/verify`. Feature map: `design/harness/README.md`.

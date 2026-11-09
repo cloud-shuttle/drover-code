@@ -74,12 +74,39 @@ type Loop struct {
 
 	// lastTraceID stores the ID of the most recent trace created by this loop.
 	lastTraceID string
+
+	// lineage is trusted spawn identity; only set via SetLineage from trusted ingress.
+	lineage Lineage
+
+	// harnessGate, when set, enforces alignment before mutating tools.
+	harnessGate interface {
+		AllowMutation(toolName string, touchedPaths []string) error
+	}
 }
 
 // LastTraceID returns the TraceID of the most recent run, useful for attaching feedback.
 func (l *Loop) LastTraceID() string {
 	return l.lastTraceID
 }
+
+
+// Lineage returns the trusted spawn identity for this loop.
+func (l *Loop) Lineage() Lineage {
+	return l.lineage
+}
+
+// SetLineage attaches trusted lineage. Only call from trusted ingress / coordinator admission.
+func (l *Loop) SetLineage(lin Lineage) {
+	l.lineage = lin
+}
+
+// SetHarnessGate attaches an optional alignment gate (internal/harness.Gate).
+func (l *Loop) SetHarnessGate(g interface {
+	AllowMutation(toolName string, touchedPaths []string) error
+}) {
+	l.harnessGate = g
+}
+
 
 // NewLoop constructs a Loop.
 //

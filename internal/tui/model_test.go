@@ -401,11 +401,17 @@ func TestModel_PauseResumeCommands(t *testing.T) {
 		t.Errorf("expected lastPauseReason 'runaway tool', got %q", m.lastPauseReason)
 	}
 
-	// Simulate the completion message as the real flow does on Canceled
+	// Simulate the real flow on Canceled: the loop emits ErrorEvent, then the
+	// run returns and the runner sends agentRunCompleteMsg.
 	next, _ := m.Update(agentMsg{event: agent.ErrorEvent{Err: context.Canceled}})
 	m2 := next.(*Model)
 	if !strings.Contains(m2.lastError, "paused") {
 		t.Errorf("expected paused error, got %q", m2.lastError)
+	}
+	next, _ = m2.Update(agentRunCompleteMsg{err: context.Canceled})
+	m2 = next.(*Model)
+	if !strings.Contains(m2.lastError, "paused") {
+		t.Errorf("expected paused error after run complete, got %q", m2.lastError)
 	}
 	turns := m2.HistoryView.GetTurns()
 	if len(turns) == 0 {
@@ -569,12 +575,24 @@ func TestModel_FullPauseResumeDuringRealToolRun(t *testing.T) {
 	next, _ = m.Update(agentMsg{event: agent.DoneEvent{}})
 	m = next.(*Model)
 
-	// Final verification: tool result from the interrupted+resumed run is recorded, agent is idle
+	// Final verification: tool result from the interrupted+resumed run is recorded
+	// in final history (DoneEvent drains LiveRegion), and the agent is idle.
 	if m.agentBusy {
 		t.Error("expected agent idle after resumed tool run completed")
 	}
-	if m.Live == nil || len(m.Live.CompletedTools) == 0 || m.Live.CompletedTools[len(m.Live.CompletedTools)-1].Summary != "done after resume" {
-		t.Error("expected the tool from the paused+resumed run to be recorded (in real flow it ends up in final history)")
+	recorded := false
+	for _, turn := range m.HistoryView.GetTurns() {
+		for _, ct := range turn.Tools {
+			if ct.Name == "bash" && ct.Summary == "done after resume" {
+				recorded = true
+			}
+		}
+	}
+	if !recorded {
+		t.Error("expected the tool from the paused+resumed run to be recorded in final history")
+	}
+	if m.Live != nil && len(m.Live.CompletedTools) != 0 {
+		t.Error("expected LiveRegion completed tools to be drained after DoneEvent")
 	}
 }
 
