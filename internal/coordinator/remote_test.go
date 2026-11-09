@@ -25,8 +25,16 @@ func TestGitHeadSHA(t *testing.T) {
 
 	// Create commit
 	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0o644)
-	exec.Command("git", "-C", dir, "add", "test.txt").Run()
-	exec.Command("git", "-C", dir, "commit", "-m", "init").Run()
+	if out, err := exec.Command("git", "-C", dir, "add", "test.txt").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
+	// CI runners have no global git identity; set one for this commit only.
+	commit := exec.Command("git", "-C", dir,
+		"-c", "user.name=drover-test", "-c", "user.email=drover-test@example.invalid",
+		"-c", "commit.gpgsign=false", "commit", "-m", "init")
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
 
 	sha, err := gitHeadSHA(context.Background(), dir)
 	if err != nil {

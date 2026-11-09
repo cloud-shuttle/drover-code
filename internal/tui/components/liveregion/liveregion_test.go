@@ -182,6 +182,12 @@ func TestLiveRegion_Throttle_RateLimitsVisibleUpdates(t *testing.T) {
 	// regardless of how long the test takes to execute on any machine.
 	lr.preview.lastVisibleCommit = time.Now().Add(10 * time.Hour)
 
+	// Move the response start outside the startup window (2.5s / 300 chars).
+	// During startup, maybeCommitVisible intentionally drains pending into
+	// .lines and promotes it (see TestLiveRegion_Startup_DrainsPendingImmediately);
+	// this test covers the steady-state throttle that applies afterwards.
+	lr.preview.responseStart = time.Now().Add(-10 * time.Second)
+
 	// Now do a burst of tiny non-boundary appends whose total growth is well
 	// under the 18-char promotion threshold, all within the same millisecond.
 	// These stay in pending until we hit a boundary or ForceFlush.
@@ -209,6 +215,31 @@ func TestLiveRegion_Throttle_RateLimitsVisibleUpdates(t *testing.T) {
 	if !strings.Contains(viewAfter, "Hello world") || !strings.Contains(lr.preview.lines, "xyzxyzxyzxyz") {
 		t.Errorf("after ForceFlush, expected full text in lines and view. lines=%q view=%q",
 			lr.preview.lines, viewAfter)
+	}
+}
+
+func TestLiveRegion_Startup_DrainsPendingImmediately(t *testing.T) {
+	lr := New()
+	lr.SetSize(80, 24)
+	lr.Streaming = true
+
+	lr.AppendStreamingDelta("Hello world. ")
+	_ = lr.View()
+	startVisibleLen := len(lr.preview.visible)
+
+	// Within the startup window, tiny non-boundary fragments are drained into
+	// .lines and promoted on the next View so opening words never fragment.
+	for i := 0; i < 4; i++ {
+		lr.AppendStreamingDelta("xyz")
+	}
+	_ = lr.View()
+
+	if lr.preview.pending != "" {
+		t.Errorf("expected startup drain to empty pending, got %q", lr.preview.pending)
+	}
+	if !strings.Contains(lr.preview.visible, "xyzxyzxyzxyz") || len(lr.preview.visible) <= startVisibleLen {
+		t.Errorf("expected startup promotion of drained fragments: before=%d visible=%q",
+			startVisibleLen, lr.preview.visible)
 	}
 }
 
