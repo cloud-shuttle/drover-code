@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, master]
@@ -8,11 +11,33 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: drover-code
     steps:
-      - uses: actions/checkout@v4
+      # go.mod replaces drover-warden and drover-libs with ../ sibling paths
+      # (private repos), so check all three out side by side. Same pattern and
+      # org secret as drover-cloud's CI.
+      - name: Checkout drover-code
+        uses: actions/checkout@v4
+        with:
+          path: drover-code
+      - name: Checkout drover-warden
+        uses: actions/checkout@v4
+        with:
+          repository: cloud-shuttle/drover-warden
+          path: drover-warden
+          token: ${{ secrets.GH_ORG_READ_PAT }}
+      - name: Checkout drover-libs
+        uses: actions/checkout@v4
+        with:
+          repository: cloud-shuttle/drover-libs
+          path: drover-libs
+          token: ${{ secrets.GH_ORG_READ_PAT }}
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version-file: drover-code/go.mod
+          cache-dependency-path: drover-code/go.sum
       - name: Test (Unit, Snapshot, and E2E)
         env:
           TERM: xterm-256color
@@ -27,7 +52,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ github.run_id }}
-          path: coverage.out
+          path: drover-code/coverage.out
           retention-days: 7
 
   quality-gate:
@@ -57,11 +82,33 @@ jobs:
 
   fuzz:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: drover-code
     steps:
-      - uses: actions/checkout@v4
+      # go.mod replaces drover-warden and drover-libs with ../ sibling paths
+      # (private repos), so check all three out side by side. Same pattern and
+      # org secret as drover-cloud's CI.
+      - name: Checkout drover-code
+        uses: actions/checkout@v4
+        with:
+          path: drover-code
+      - name: Checkout drover-warden
+        uses: actions/checkout@v4
+        with:
+          repository: cloud-shuttle/drover-warden
+          path: drover-warden
+          token: ${{ secrets.GH_ORG_READ_PAT }}
+      - name: Checkout drover-libs
+        uses: actions/checkout@v4
+        with:
+          repository: cloud-shuttle/drover-libs
+          path: drover-libs
+          token: ${{ secrets.GH_ORG_READ_PAT }}
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version-file: drover-code/go.mod
+          cache-dependency-path: drover-code/go.sum
       - name: Fuzz (30s per target)
         env:
           CGO_ENABLED: "0"
@@ -92,11 +139,33 @@ jobs:
   harness-discipline:
     name: Harness discipline
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: drover-code
     steps:
-      - uses: actions/checkout@v4
+      # go.mod replaces drover-warden and drover-libs with ../ sibling paths
+      # (private repos), so check all three out side by side. Same pattern and
+      # org secret as drover-cloud's CI.
+      - name: Checkout drover-code
+        uses: actions/checkout@v4
+        with:
+          path: drover-code
+      - name: Checkout drover-warden
+        uses: actions/checkout@v4
+        with:
+          repository: cloud-shuttle/drover-warden
+          path: drover-warden
+          token: ${{ secrets.GH_ORG_READ_PAT }}
+      - name: Checkout drover-libs
+        uses: actions/checkout@v4
+        with:
+          repository: cloud-shuttle/drover-libs
+          path: drover-libs
+          token: ${{ secrets.GH_ORG_READ_PAT }}
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version-file: drover-code/go.mod
+          cache-dependency-path: drover-code/go.sum
       - name: Required harness files
         run: bash scripts/harness/check-discipline.sh
       - name: Harness unit tests
