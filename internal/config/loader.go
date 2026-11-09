@@ -57,6 +57,9 @@ type Settings struct {
 	ProjectMarkdownMaxFiles    int                      `json:"projectMarkdownMaxFiles,omitempty"`
 	ProjectMarkdownIgnoreGlobs []string                 `json:"projectMarkdownIgnoreGlobs,omitempty"`
 	DisableAutoCompaction      bool                     `json:"disableAutoCompaction,omitempty"`
+	// MaxAgentTiers tightens the operator delegation ceiling (max 3). Values above the
+	// operator ceiling are ignored; zero means use the operator default.
+	MaxAgentTiers             int                      `json:"maxAgentTiers,omitempty"`
 	DreamMaxRetentionEntries   int                      `json:"dreamMaxRetentionEntries,omitempty"`
 	DreamMaxRetentionAgeDays   int                      `json:"dreamMaxRetentionAgeDays,omitempty"`
 

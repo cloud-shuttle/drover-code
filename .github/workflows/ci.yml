@@ -88,3 +88,22 @@ jobs:
           run_fuzz parseExecStream internal/tools/ukc FuzzParseExecStream
           run_fuzz templateExpander internal/commands FuzzTemplateExpander
           run_fuzz parseMarkdownCmd internal/commands FuzzParseMarkdownCommand
+
+  harness-discipline:
+    name: Harness discipline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Required harness files
+        run: bash scripts/harness/check-discipline.sh
+      - name: Harness unit tests
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go test -count=1 ./internal/agent/ -run 'TestAdmitSpawn|TestParseUntrusted' 
+          go test -count=1 ./internal/harness/ ./internal/verification/ ./internal/convo/ -run 'Budget|Soft|Lifetime|Warn|Small|NonTrivial|Spec|Scope|Model|ReadOnly|Verifier|Stale|Missing|Pass|Repair|Evidence'
+          go test -count=1 ./internal/config/ -run 'TestSelectAccepted'
+          go test -count=1 ./internal/commands/ -run 'TestLoadSkills'
