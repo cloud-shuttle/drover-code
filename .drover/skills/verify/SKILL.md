@@ -1,6 +1,8 @@
 ---
 name: verify
 description: Run verifier-per-PR smoke journeys with evidence. Use after an approved PR head SHA is ready.
+product: drover-code
+audience: agent
 ---
 
 # Verify (verifier-per-PR)

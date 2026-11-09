@@ -5,8 +5,8 @@ product: drover-code
 audience: platform-operator
 doc_type: adr
 topics:
-  - harness
-  - delegation
+  - agent-jobs
+  - governance-policy
 surface: repo-docs
 ---
 # ADR 0001: Trusted delegation depth ceiling

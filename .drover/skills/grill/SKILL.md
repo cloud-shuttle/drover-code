@@ -1,6 +1,8 @@
 ---
 name: grill
 description: Stress-test a plan until shared understanding is confirmed. Use before non-trivial implementation.
+product: drover-code
+audience: agent
 ---
 
 # Grill (alignment interview)
