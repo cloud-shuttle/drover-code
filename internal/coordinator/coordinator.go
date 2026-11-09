@@ -19,6 +19,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/config"
+	"github.com/cloudshuttle/drover-code/internal/harness"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
@@ -296,6 +297,20 @@ func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, 
 
 	workerDriver := agent.NewAnthropicInferenceDriver(c.client)
 	workerExecutor := agent.NewDefaultToolExecutor(reg, permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll), workerEvents)
+	gate := harness.NewGate(repoMount)
+	gate.RequireForHeadless = true
+	// Workers inherit approved-spec binding from parent lineage when present.
+	if childLin.ApprovedSpec != "" && childLin.Scope != "" {
+		_ = gate.Accept(harness.Spec{
+			TaskID:      "coord-" + childLin.RootID,
+			WorkSize:    harness.WorkSmall,
+			SkipReason:  "coordinator worker bound to parent approved_spec_hash=" + childLin.ApprovedSpec,
+			Approver:    "coordinator:" + childLin.ParentID,
+			ContentHash: childLin.ApprovedSpec,
+			Boundaries:  []string{childLin.Scope},
+		})
+	}
+	workerExecutor.SetGate(gate)
 	workerLoop := agent.NewLoop(
 		workerDriver,
 		workerMgr,
