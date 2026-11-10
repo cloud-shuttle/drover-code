@@ -221,6 +221,9 @@ func (c *Client) StreamMessage(ctx context.Context, req StreamRequest) (*Stream,
 		}
 
 		if c.Protocol() == ProtocolOpenAI {
+			if openAIUsesResponses(c.model) {
+				return newResponsesTranslatedStream(resp.Body), nil
+			}
 			return newOpenAITranslatedStream(resp.Body), nil
 		}
 		return newStream(resp.Body), nil
@@ -229,6 +232,9 @@ func (c *Client) StreamMessage(ctx context.Context, req StreamRequest) (*Stream,
 
 func (c *Client) streamURL() string {
 	if c.Protocol() == ProtocolOpenAI {
+		if openAIUsesResponses(c.model) {
+			return c.responsesURL()
+		}
 		return c.chatCompletionsURL()
 	}
 	return c.baseURL + "/v1/messages"
@@ -246,6 +252,9 @@ func (c *Client) applyAuthHeaders(req *http.Request) {
 // buildRequestBody marshals the request into the JSON wire format.
 func (c *Client) buildRequestBody(req StreamRequest) ([]byte, error) {
 	if c.Protocol() == ProtocolOpenAI {
+		if openAIUsesResponses(c.model) {
+			return buildResponsesRequestBody(c.model, req)
+		}
 		return buildOpenAIRequestBody(c.model, req)
 	}
 	body := map[string]any{

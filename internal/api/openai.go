@@ -15,18 +15,151 @@ func (c *Client) chatCompletionsURL() string {
 	return base + "/v1/chat/completions"
 }
 
+// openAIMaxTokenField picks the limit field the model accepts.
+// gpt-5, gpt-6, and the o-series reject max_tokens. Other Chat Completions
+// servers, including SGLang, still use max_tokens.
+func openAIModelID(model string) string {
+	id := strings.ToLower(strings.TrimSpace(model))
+	if i := strings.LastIndex(id, "/"); i >= 0 {
+		id = id[i+1:]
+	}
+	return id
+}
+
+func openAIMaxTokenField(model string) string {
+	id := openAIModelID(model)
+	if strings.HasPrefix(id, "gpt-5") || strings.HasPrefix(id, "gpt-6") ||
+		strings.HasPrefix(id, "o1") || strings.HasPrefix(id, "o3") || strings.HasPrefix(id, "o4") {
+		return "max_completion_tokens"
+	}
+	return "max_tokens"
+}
+
+// gpt-6 chat completions reject function tools. The Responses API accepts them.
+func openAIUsesResponses(model string) bool {
+	return strings.HasPrefix(openAIModelID(model), "gpt-6")
+}
+
 func buildOpenAIRequestBody(model string, req StreamRequest) ([]byte, error) {
 	body := map[string]any{
-		"model":      model,
-		"max_tokens": req.MaxTokens,
-		"stream":     true,
-		"messages":   marshalOpenAIMessages(req.System, req.Messages),
+		"model":                    model,
+		openAIMaxTokenField(model): req.MaxTokens,
+		"stream":                   true,
+		"messages":                 marshalOpenAIMessages(req.System, req.Messages),
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = marshalOpenAITools(req.Tools)
 		body["tool_choice"] = "auto"
 	}
 	return json.Marshal(body)
+}
+
+func (c *Client) responsesURL() string {
+	base := strings.TrimRight(c.baseURL, "/")
+	if strings.HasSuffix(base, "/v1") {
+		return base + "/responses"
+	}
+	return base + "/v1/responses"
+}
+
+func buildResponsesRequestBody(model string, req StreamRequest) ([]byte, error) {
+	body := map[string]any{
+		"model":             model,
+		"max_output_tokens": req.MaxTokens,
+		"stream":            true,
+		"input":             marshalResponsesInput(req.Messages),
+	}
+	if req.System != "" {
+		body["instructions"] = req.System
+	}
+	if len(req.Tools) > 0 {
+		body["tools"] = marshalResponsesTools(req.Tools)
+	}
+	return json.Marshal(body)
+}
+
+func marshalResponsesTools(tools []ToolDefinition) []map[string]any {
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		item := map[string]any{
+			"type":        "function",
+			"name":        t.Name,
+			"description": t.Description,
+		}
+		if len(t.InputSchema) > 0 {
+			var params any
+			if err := json.Unmarshal(t.InputSchema, &params); err == nil {
+				item["parameters"] = params
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func marshalResponsesInput(msgs []Message) []any {
+	out := make([]any, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == RoleAssistant {
+			out = append(out, marshalResponsesAssistant(m)...)
+			continue
+		}
+		out = append(out, marshalResponsesUser(m)...)
+	}
+	return out
+}
+
+func marshalResponsesAssistant(m Message) []any {
+	var text strings.Builder
+	var calls []any
+	for _, block := range m.Content {
+		switch b := block.(type) {
+		case TextBlock:
+			text.WriteString(b.Text)
+		case ToolUseBlock:
+			args := string(b.Input)
+			if strings.TrimSpace(args) == "" {
+				args = "{}"
+			}
+			calls = append(calls, map[string]any{
+				"type":      "function_call",
+				"call_id":   b.ID,
+				"name":      b.Name,
+				"arguments": args,
+			})
+		}
+	}
+	out := make([]any, 0, 1+len(calls))
+	if text.Len() > 0 {
+		out = append(out, map[string]any{"role": "assistant", "content": text.String()})
+	}
+	out = append(out, calls...)
+	return out
+}
+
+func marshalResponsesUser(m Message) []any {
+	var text strings.Builder
+	var results []ToolResultBlock
+	for _, block := range m.Content {
+		switch b := block.(type) {
+		case TextBlock:
+			text.WriteString(b.Text)
+		case ToolResultBlock:
+			results = append(results, b)
+		}
+	}
+	out := make([]any, 0, 1+len(results))
+	if text.Len() > 0 || len(results) == 0 {
+		out = append(out, map[string]any{"role": "user", "content": text.String()})
+	}
+	for _, r := range results {
+		out = append(out, map[string]any{
+			"type":    "function_call_output",
+			"call_id": r.ToolUseID,
+			"output":  responsesOutput(r),
+		})
+	}
+	return out
 }
 
 func marshalOpenAITools(tools []ToolDefinition) []map[string]any {
@@ -123,14 +256,10 @@ func marshalOpenAIUserOrTool(m Message) []map[string]any {
 		})
 	}
 	for _, r := range results {
-		content := r.Content
-		if r.IsError && content != "" && !strings.HasPrefix(strings.ToLower(content), "error") {
-			content = "Error: " + content
-		}
 		out = append(out, map[string]any{
 			"role":         "tool",
 			"tool_call_id": r.ToolUseID,
-			"content":      content,
+			"content":      chatToolContent(r),
 		})
 	}
 	return out

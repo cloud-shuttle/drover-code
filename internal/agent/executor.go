@@ -8,12 +8,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/warden"
-	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
 )
 
 type ToolExecutor interface {
@@ -263,9 +263,14 @@ exec:
 		OutputSummary: truncate(output, 80),
 	})
 
+	text, images := api.UnpackImages(output)
+	if call.Name == "todo" {
+		e.emit(TodoEvent{Text: text})
+	}
 	return api.ToolResultBlock{
 		ToolUseID: call.ID,
-		Content:   output,
+		Content:   text,
+		Images:    images,
 		IsError:   false,
 	}, nil
 }

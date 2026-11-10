@@ -28,8 +28,11 @@ import (
 	github "github.com/cloudshuttle/drover-code/internal/github"
 	"github.com/cloudshuttle/drover-code/internal/mcp"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
+	"github.com/cloudshuttle/drover-code/internal/skills"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
+	todopkg "github.com/cloudshuttle/drover-code/internal/tools/todo"
+	webpkg "github.com/cloudshuttle/drover-code/internal/tools/web"
 	"github.com/cloudshuttle/drover-code/internal/tui"
 	"github.com/cloudshuttle/drover-code/internal/undercover"
 	"github.com/cloudshuttle/drover-code/internal/warden"
@@ -143,6 +146,7 @@ func main() {
 	config.ApplyTheme(settings) // Theme System foundation
 	registry := tools.NewRegistry()
 	tools.RegisterAll(registry, workDir)
+	registerLocalHarness(registry, workDir)
 
 	dreamStore, dreamWorker := setupDream(settings, workDir, client)
 
@@ -163,7 +167,11 @@ func main() {
 	ctx, cancel := signal.NotifyContext(telemetry.WithTracer(baseCtx, lf), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	mcp.RegisterAll(ctx, registry, settings)
+	var mcpNotes []string
+	for _, w := range mcp.RegisterAll(ctx, registry, settings) {
+		fmt.Fprintf(os.Stderr, "mcp: %s\n", w)
+		mcpNotes = append(mcpNotes, w)
+	}
 
 	// Custom commands setup
 	cmdLoader := commands.NewLoader(workDir)
@@ -191,7 +199,7 @@ func main() {
 		runCoordinatorMode(ctx, client, registry, modelStr, workDir, settings, dreamWorker)
 
 	default:
-		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore, cmdExecutor, themeSaveFn)
+		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore, cmdExecutor, themeSaveFn, mcpNotes)
 	}
 }
 
@@ -251,6 +259,7 @@ func runTUI(
 	ds dream.Store,
 	cmdExec *commands.Executor,
 	themeSaveFn func(mode, palette string) error,
+	notes []string,
 ) {
 	if ds != nil {
 		if inj := dream.BuildInjection(ds, 5); inj != "" {
@@ -262,6 +271,9 @@ func runTUI(
 	}
 
 	prog := tui.NewProgram(ctx, client, mgr, registry, modelStr, settings, workDir, cmdExec, themeSaveFn)
+	for _, note := range notes {
+		prog.Note(note)
+	}
 	if err := prog.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -489,9 +501,7 @@ func runHeadless(
 			hadErr = true
 			lastAgentErr = err
 			exitCode = headlessExitCode(err)
-			if useJSONL {
-				fmt.Fprintf(os.Stderr, "drover-code: agent error: %v\n", err)
-			}
+			fmt.Fprintf(os.Stderr, "drover-code: agent error: %v\n", err)
 			return true
 		}
 		return false
@@ -958,7 +968,23 @@ Custom commands are force multipliers. Use them liberally to maintain consistenc
 		b.WriteString("\n\nProject-specific instructions:\n")
 		b.WriteString(projectMarkdown)
 	}
+	if os.Getenv("DROVER_CODE_PERMISSION_PRESET") != permissions.PresetUnikernel {
+		b.WriteString("\n\nLocal tools: web_search finds pages, web_fetch reads one URL, read_skill loads one skill body, and todo replaces the session checklist. MCP tools are named mcp_{server}_{tool}.\n")
+		if p := skills.Prompt(workDir); p != "" {
+			b.WriteString("\n")
+			b.WriteString(p)
+		}
+	}
 	return b.String()
+}
+
+func registerLocalHarness(reg *tools.Registry, workDir string) {
+	if os.Getenv("DROVER_CODE_PERMISSION_PRESET") == permissions.PresetUnikernel {
+		return
+	}
+	reg.Register(webpkg.NewSearch())
+	reg.Register(&skills.ReadTool{WorkDir: workDir})
+	reg.Register(&todopkg.List{})
 }
 
 func printEvents(ch <-chan agent.Event) {
@@ -969,6 +995,8 @@ func printEvents(ch <-chan agent.Event) {
 			fmt.Print(e.Text)
 		case agent.ToolStartEvent:
 			fmt.Fprintf(os.Stderr, "\n⚙  %s\n", e.InputSummary)
+		case agent.TodoEvent:
+			fmt.Fprintf(os.Stderr, "\n%s\n", e.Text)
 		case agent.ToolDoneEvent:
 			if e.IsError {
 				fmt.Fprintf(os.Stderr, "✗  %s\n", e.OutputSummary)

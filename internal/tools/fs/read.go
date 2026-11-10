@@ -2,13 +2,16 @@
 package fs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
 )
 
@@ -28,6 +31,7 @@ func (t *ReadFile) Name() string { return "read_file" }
 func (t *ReadFile) Description() string {
 	return "Read the contents of a file. Returns the file content as a string. " +
 		"Use start_line and end_line to read a specific range (1-based, inclusive). " +
+		"PNG, JPEG, GIF, and WebP are returned as images. " +
 		"Returns an error for binary files."
 }
 
@@ -58,6 +62,15 @@ func (t *ReadFile) Execute(_ context.Context, rawInput json.RawMessage) (string,
 		return "", fmt.Errorf("read_file: %w", err)
 	}
 
+	if mime := imageMIME(absPath, data); mime != "" {
+		const maxImage = 4 << 20
+		if len(data) > maxImage {
+			return "", fmt.Errorf("read_file: image %q is %d bytes, over the 4MB limit", inp.Path, len(data))
+		}
+		note := fmt.Sprintf("Image %s (%s, %d bytes).", inp.Path, mime, len(data))
+		return api.PackImage(note, mime, data), nil
+	}
+
 	// Refuse binary files — they confuse the model and waste context.
 	if isBinary(data) {
 		return "", fmt.Errorf("read_file: %q appears to be a binary file", inp.Path)
@@ -74,6 +87,26 @@ func (t *ReadFile) Execute(_ context.Context, rawInput json.RawMessage) (string,
 	}
 
 	return toolutil.Truncate(content), nil
+}
+
+func imageMIME(path string, data []byte) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	}
+	if len(data) >= 8 && bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}) {
+		return "image/png"
+	}
+	if len(data) >= 3 && bytes.Equal(data[:3], []byte{0xff, 0xd8, 0xff}) {
+		return "image/jpeg"
+	}
+	return ""
 }
 
 // isBinary returns true if the data appears to be binary.
@@ -122,4 +155,3 @@ func sliceLines(content string, start, end int) (string, error) {
 	}
 	return b.String(), nil
 }
-

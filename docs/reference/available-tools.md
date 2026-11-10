@@ -55,6 +55,9 @@ This document lists all the tools implemented in drover-code and their purposes.
 | Tool | Description |
 |------|-------------|
 | `web_fetch` | Fetch the content of a URL and return it as plain text, with automatic HTML-to-text conversion. |
+| `web_search` | Search the web and return up to eight titles, URLs, and snippets. Local sessions only. |
+| `read_skill` | Load one `SKILL.md` body by name from the workspace or `~/.drover/skills`. Local sessions only. |
+| `todo` | Replace the session checklist shown above the input. Local sessions only. |
 
 ## Unikraft Cloud Tools (Optional)
 
@@ -75,7 +78,7 @@ These tools require `UKC_TOKEN` environment variable to be set.
 - `glob`, `grep`
 - `bash` (note: executes commands, but no permission flag)
 - `git_status`, `git_diff`, `git_log`
-- `web_fetch`
+- `web_fetch`, `web_search`, `read_skill`, `todo`
 - `ukc_list`
 
 ### Write/Modify Tools (Permission Required)

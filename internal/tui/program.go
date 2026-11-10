@@ -20,6 +20,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
 	liveregion "github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
+	"github.com/cloudshuttle/drover-code/internal/tui/core"
 	"github.com/cloudshuttle/drover-code/internal/tui/styles"
 )
 
@@ -320,6 +321,14 @@ func NewProgram(
 	)
 
 	return p
+}
+
+// Note shows an operator message in the transcript before the first prompt.
+func (p *Program) Note(text string) {
+	if p == nil || p.model == nil || p.model.HistoryView == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	p.model.HistoryView.AppendTurn(core.RenderedTurn{Role: "system", Content: text})
 }
 
 func (p *Program) Run() error {

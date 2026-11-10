@@ -18,17 +18,17 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/tools/fs"
+	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/historyview"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/inputarea"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/permissionprompt"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/statusbar"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/toolspinner"
+	"github.com/cloudshuttle/drover-code/internal/tui/core"
 	"github.com/cloudshuttle/drover-code/internal/tui/diff"
 	"github.com/cloudshuttle/drover-code/internal/tui/history"
 	"github.com/cloudshuttle/drover-code/internal/tui/historysearch"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/statusbar"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/toolspinner"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/permissionprompt"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/historyview"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/inputarea"
-	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
-	"github.com/cloudshuttle/drover-code/internal/tui/core"
 	"github.com/cloudshuttle/drover-code/internal/tui/styles"
 )
 
@@ -69,7 +69,7 @@ type Model struct {
 	searchModel   *historysearch.Model
 	showingSearch bool
 
-	commandPaletteModel *commandpalette.Model
+	commandPaletteModel   *commandpalette.Model
 	showingCommandPalette bool
 
 	// Components (dcode-003 and beyond)
@@ -92,10 +92,13 @@ type Model struct {
 	// paletteActionHandlers map ActionKey -> handler for custom semantic actions.
 	paletteActionHandlers map[string]commandpalette.ActionHandler
 
-
 	glamourRenderer *glamour.TermRenderer
 
 	eventCh <-chan agent.Event
+	// eventWaitArmed is true while one waitForEvent command is blocked on
+	// eventCh. Bubble Tea runs commands concurrently, so a second reader
+	// can commit a later token first ("P"+"ong" becomes "ongP").
+	eventWaitArmed bool
 
 	modelName         string
 	workDir           string
@@ -109,6 +112,7 @@ type Model struct {
 	lastAPICallOutput int
 
 	lastError string
+	todoList  string
 
 	compactionBanner string
 
@@ -199,8 +203,18 @@ func readMaxHistoryDisplayFromEnv() int {
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		textarea.Blink,
-		waitForEvent(m.eventCh),
+		m.armEventWait(),
 	)
+}
+
+// armEventWait starts the single event reader. A nil return means one is
+// already blocked on eventCh.
+func (m *Model) armEventWait() tea.Cmd {
+	if m.eventWaitArmed || m.eventCh == nil {
+		return nil
+	}
+	m.eventWaitArmed = true
+	return waitForEvent(m.eventCh)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -211,7 +225,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.relayout()
-		cmds = append(cmds, waitForEvent(m.eventCh))
+		cmds = append(cmds, m.armEventWait())
 		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
@@ -304,36 +318,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showingCommandPalette = true
 			return m, nil
 		case tea.KeyEnter, tea.KeyCtrlJ:
-			input := strings.TrimSpace(m.InputArea.Value())
-			if input != "" {
-				m.inputHistory.Add(input)
-				m.historyIndex = len(m.inputHistory.Get())
-				m.savedInput = ""
-
-				m.InputArea.Reset()
-				m.InputArea.ClearAutocomplete()
-				m.lastError = ""
-
-				in := strings.ToLower(input)
-				if in == "/quit" || in == "/exit" {
-					return m, tea.Quit
-				}
-				if in == "/history" {
-					if !m.agentBusy {
-						m.searchModel = historysearch.New(m.inputHistory.Get(), m.width, m.height)
-						m.showingSearch = true
-					}
-					return m, nil
-				}
-
-				if m.agentBusy {
-					m.InputArea.Queue(input)
-					m.scrollToBottom()
-					return m, nil
-				}
-				return m, m.submitInput(input)
-			}
-			return m, nil
+			return m, m.takeInput(false)
+		case tea.KeyCtrlG:
+			return m, m.takeInput(true)
 		case tea.KeyEsc:
 			m.InputArea.ClearAutocomplete()
 			if m.showingCommandPalette {
@@ -445,8 +432,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case agentMsg:
+		m.eventWaitArmed = false
 		cmd := m.handleAgentEvent(msg.event)
-		cmds = append(cmds, waitForEvent(m.eventCh))
+		cmds = append(cmds, m.armEventWait())
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -480,7 +468,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		
+
 		for {
 			next, ok := m.InputArea.Dequeue()
 			if !ok || m.agentBusy {
@@ -490,7 +478,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		
+
 		return m, tea.Batch(cmds...)
 
 	case compactCompleteMsg:
@@ -507,7 +495,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.scrollToBottom()
 
-		cmds = append(cmds, waitForEvent(m.eventCh))
+		cmds = append(cmds, m.armEventWait())
 		for {
 			next, ok := m.InputArea.Dequeue()
 			if !ok || m.agentBusy {
@@ -517,7 +505,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		
+
 		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
@@ -566,6 +554,9 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 		m.scrollToBottom()
 		return ts.Spinner.Tick
 
+	case agent.TodoEvent:
+		m.todoList = e.Text
+
 	case agent.ToolDoneEvent:
 		// LiveRegion is the sole owner of active tools + completed tools
 		if _, ok := m.Live.ActiveTools[e.CallIndex]; ok {
@@ -598,7 +589,7 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 				dm := diff.NewDiffModel(filePath, diffStr)
 				m.diffModel = &dm
 				m.showingDiff = true
-				
+
 				// dcode-007: PermissionPrompt component (legacy dual-state fully removed)
 				m.PermPrompt = &permissionprompt.PermissionPrompt{
 					ToolName:   e.ToolName,
@@ -763,6 +754,48 @@ func (m *Model) handlePermissionBatchKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// takeInput submits the draft. sendNow cancels a live turn and puts the draft
+// at the front of the queue so it runs as soon as the turn stops.
+func (m *Model) takeInput(sendNow bool) tea.Cmd {
+	input := strings.TrimSpace(m.InputArea.Value())
+	if input == "" {
+		return nil
+	}
+	m.inputHistory.Add(input)
+	m.historyIndex = len(m.inputHistory.Get())
+	m.savedInput = ""
+	m.InputArea.Reset()
+	m.InputArea.ClearAutocomplete()
+	m.lastError = ""
+
+	in := strings.ToLower(input)
+	if in == "/quit" || in == "/exit" {
+		return tea.Quit
+	}
+	if in == "/history" {
+		if !m.agentBusy {
+			m.searchModel = historysearch.New(m.inputHistory.Get(), m.width, m.height)
+			m.showingSearch = true
+		}
+		return nil
+	}
+	if m.agentBusy {
+		if sendNow {
+			m.InputArea.QueueFront(input)
+			if m.runCancel != nil {
+				m.runCancel()
+				m.runCancel = nil
+			}
+			m.lastError = "Sending when the current turn stops."
+		} else {
+			m.InputArea.Queue(input)
+		}
+		m.scrollToBottom()
+		return nil
+	}
+	return m.submitInput(input)
+}
+
 func (m *Model) submitInput(input string) tea.Cmd {
 	if cmd, handled := m.handleBuiltinSlash(input); handled {
 		return cmd
@@ -884,7 +917,7 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 			m.StatusBar.AgentBusy = true
 		}
 
-		return tea.Batch(runCompact(m.compactFn), waitForEvent(m.eventCh)), true
+		return tea.Batch(runCompact(m.compactFn), m.armEventWait()), true
 	case "/resume":
 		if !m.agentBusy {
 			// Resume by continuing the agentic loop with the current conversation state.
@@ -1018,8 +1051,6 @@ func (m *Model) modelInfoText() string {
 		CurrentThemeMode,
 	))
 }
-
-
 
 func defaultSlashCommands() []slashItem {
 	return []slashItem{
@@ -1329,7 +1360,7 @@ func (m *Model) executePaletteAction(key string) tea.Cmd {
 				m.StatusBar.AgentBusy = true
 			}
 			m.Live.Streaming = false
-			return tea.Batch(runCompact(m.compactFn), waitForEvent(m.eventCh))
+			return tea.Batch(runCompact(m.compactFn), m.armEventWait())
 		}
 		m.lastError = "compaction is not available"
 		return nil
@@ -1397,4 +1428,3 @@ func (m *Model) executePaletteAction(key string) tea.Cmd {
 		return nil
 	}
 }
-

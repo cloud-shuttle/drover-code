@@ -9,6 +9,23 @@ import (
 	"testing"
 )
 
+func TestReadFile_PNGIsPackedImage(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "shot.png")
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}
+	if err := os.WriteFile(p, png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &ReadFile{WorkDir: dir}
+	out, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{"path": "shot.png"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "@@image image/png ") || !strings.Contains(out, "Image shot.png") {
+		t.Fatalf("out %q", out)
+	}
+}
+
 func TestReadFile_BinaryRefused(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "bin.dat")
