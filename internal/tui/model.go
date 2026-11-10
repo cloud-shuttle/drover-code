@@ -62,6 +62,7 @@ type Model struct {
 	// dcode-007: Permission prompt components (source of truth)
 	PermPrompt *permissionprompt.PermissionPrompt
 	PermBatch  *permissionprompt.PermissionBatchPrompt
+	askUser    *askUserPrompt
 
 	diffModel   *diff.Model
 	showingDiff bool
@@ -107,6 +108,9 @@ type Model struct {
 	totalInputTokens  int
 	totalOutputTokens int
 	agentBusy         bool
+	runGen            int
+	turnOpen          bool
+	pendingBash       []string
 
 	lastAPICallInput  int
 	lastAPICallOutput int
@@ -125,6 +129,15 @@ type Model struct {
 	compactFn       func() error
 	convoMgr        *convo.Manager
 	themeSaveFn     func(mode, palette string) error // for persisting theme changes
+	onClear         func()
+	planOn          bool
+	planToggle      func(on bool)
+
+	showingSessions bool
+	sessionRows     []SessionRow
+	sessionQuery    string
+	sessionCursor   int
+	loadSession     func(id string) error
 }
 
 // SetRunCancel allows injecting the context cancellation function for the current run
@@ -229,6 +242,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
+		if m.showingSessions {
+			return m.updateSessionPick(msg)
+		}
 		if m.showingSearch && m.searchModel != nil {
 			var newModel tea.Model
 			var cmd tea.Cmd
@@ -291,9 +307,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.handlePermissionBatchKey(msg)
 			return m, cmd
 		}
+		if m.askUser != nil && (msg.Type == tea.KeyEnter || msg.Type == tea.KeyCtrlJ) {
+			return m, m.answerAsk()
+		}
+		if m.askUser != nil && msg.Type == tea.KeyEsc {
+			m.dismissAsk()
+			return m, nil
+		}
 
 		switch msg.Type {
 		case tea.KeyCtrlC:
+			m.clearAsk()
 			if m.agentBusy {
 				if m.runCancel != nil {
 					m.runCancel()
@@ -365,6 +389,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.InputArea.AcceptAutocomplete() {
 				return m, nil
 			}
+		case tea.KeyShiftTab:
+			m.togglePlanMode()
+			return m, nil
 		case tea.KeyPgUp, tea.KeyPgDown:
 			var vpCmd tea.Cmd
 			if m.HistoryView != nil {
@@ -431,6 +458,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commandPaletteModel = nil
 		return m, nil
 
+	case BackgroundBashMsg:
+		if m.StatusBar != nil {
+			m.StatusBar.BackgroundJobs = msg.Running
+		}
+		if !msg.Done || msg.Output == "" {
+			return m, nil
+		}
+		if m.agentPaused() {
+			m.noteBackground(msg.Output)
+			return m, nil
+		}
+		if m.agentBusy || m.turnOpen {
+			m.pendingBash = append(m.pendingBash, msg.Output)
+			return m, nil
+		}
+		return m, m.submitInput(msg.Output)
+
 	case agentMsg:
 		m.eventWaitArmed = false
 		cmd := m.handleAgentEvent(msg.event)
@@ -441,6 +485,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case agentRunCompleteMsg:
+		if msg.gen != 0 && msg.gen != m.runGen {
+			return m, nil
+		}
+		m.turnOpen = false
 		m.agentBusy = false
 		if msg.err != nil {
 			if errors.Is(msg.err, context.Canceled) {
@@ -459,6 +507,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.StatusBar.Paused = true
 					m.StatusBar.PausedReason = pausedReasonForBar
 				}
+				for _, text := range m.pendingBash {
+					m.noteBackground(text)
+				}
+				m.pendingBash = nil
+				return m, tea.Batch(cmds...)
 			} else {
 				m.lastError = msg.err.Error()
 
@@ -470,7 +523,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		for {
-			next, ok := m.InputArea.Dequeue()
+			next, ok := m.popFollowUp(msg.err == nil)
 			if !ok || m.agentBusy {
 				break
 			}
@@ -575,6 +628,13 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 				}
 			}
 		}
+
+	case agent.AskUserEvent:
+		if m.askUser != nil {
+			m.dismissAsk()
+		}
+		m.askUser = &askUserPrompt{Question: e.Question, ReplyCh: e.ReplyCh}
+		m.lastError = ""
 
 	case agent.PermissionRequestEvent:
 		// Deeper Guard heuristics (beyond simple tool names)
@@ -687,13 +747,10 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 		m.Live.ToolOrder = nil
 		m.Live.CompletedTools = nil
 
-		if next, ok := m.InputArea.Dequeue(); ok {
-			return m.submitInput(next)
-		}
-
 		m.scrollToBottom()
 
 	case agent.ErrorEvent:
+		m.clearAsk()
 		m.lastError = e.Err.Error()
 		m.agentBusy = false
 		_ = m.InputArea.DrainQueue() // Clear the queue on error
@@ -830,13 +887,56 @@ func (m *Model) submitInput(input string) tea.Cmd {
 	m.scrollToBottom()
 
 	if m.runFunc != nil {
-		return m.runFunc(input)
+		cmd := m.runFunc(input)
+		if cmd == nil {
+			return nil
+		}
+		m.runGen++
+		gen := m.runGen
+		m.turnOpen = true
+		return func() tea.Msg {
+			msg := cmd()
+			if done, ok := msg.(agentRunCompleteMsg); ok {
+				done.gen = gen
+				return done
+			}
+			return msg
+		}
 	}
 	return nil
 }
 
+func (m *Model) agentPaused() bool {
+	return m.StatusBar != nil && m.StatusBar.Paused
+}
+
+func (m *Model) noteBackground(text string) {
+	if text == "" || m.HistoryView == nil {
+		return
+	}
+	m.HistoryView.AppendTurn(core.RenderedTurn{Role: "system", Content: text})
+}
+
+func (m *Model) popFollowUp(allowUser bool) (string, bool) {
+	if allowUser {
+		if next, ok := m.InputArea.Dequeue(); ok {
+			return next, true
+		}
+	}
+	if len(m.pendingBash) == 0 {
+		return "", false
+	}
+	next := m.pendingBash[0]
+	m.pendingBash = m.pendingBash[1:]
+	return next, true
+}
+
 func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 	in := strings.TrimSpace(input)
+	if in == "/planmode" {
+		m.togglePlanMode()
+		return nil, true
+	}
 	if strings.HasPrefix(in, "/plan") {
 		rest := strings.TrimSpace(strings.TrimPrefix(in, "/plan"))
 		if rest == "" {
@@ -850,9 +950,14 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 			detail = strings.TrimSpace(parts[1])
 		}
 		var prompt string
-		if detail == "" {
+		switch {
+		case m.planOn && detail == "":
+			prompt = fmt.Sprintf("Write a clear implementation plan for %q. Plan mode is on, so do not call write_file, edit_file, or bash. Put the plan in your reply. write_plan may update PLAN.md.", path)
+		case m.planOn:
+			prompt = fmt.Sprintf("Write a clear implementation plan for %q that addresses: %s. Plan mode is on, so do not call write_file, edit_file, or bash. Put the plan in your reply. write_plan may update PLAN.md.", path, detail)
+		case detail == "":
 			prompt = fmt.Sprintf("Create a clear implementation or design plan as Markdown in the file %q using write_file (create parent directories if needed). Include phases, concrete deliverables, and success criteria. When done, briefly confirm the path.", path)
-		} else {
+		default:
 			prompt = fmt.Sprintf("Create or update the Markdown file %q using write_file (create parent directories if needed) with a plan that addresses: %s\n\nBe specific and actionable. When done, briefly confirm the path.", path, detail)
 		}
 		m.HistoryView.AppendTurn(core.RenderedTurn{Role: "user", Content: in})
@@ -888,15 +993,7 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 	case "/quit", "/exit":
 		return tea.Quit, true
 	case "/clear", "/reset":
-		m.HistoryView.Clear()
-		m.streamBuf.Reset()
-		if m.Live != nil {
-			m.Live.ResetLiveStreaming()
-		}
-		m.lastError = ""
-		if m.convoMgr != nil {
-			m.convoMgr.Reset()
-		}
+		m.clearConversation()
 		return nil, true
 	case "/tokens":
 		m.appendLocalInfo(m.tokensInfoText())
@@ -1058,6 +1155,7 @@ func defaultSlashCommands() []slashItem {
 		{"reset", "reset conversation"},
 		{"quit", "exit drover-code"},
 		{"plan", "write a plan file: /plan path topic"},
+		{"planmode", "toggle plan mode (also Shift+Tab)"},
 		{"compact", "summarise and compress context"},
 		{"model", "switch model"},
 		{"tokens", "show token usage"},
@@ -1170,6 +1268,26 @@ func (m *Model) SetCompactFn(fn func() error) { m.compactFn = fn }
 func (m *Model) SetThemeSaveFn(fn func(mode, palette string) error) { m.themeSaveFn = fn }
 
 func (m *Model) SetConversation(mgr *convo.Manager) { m.convoMgr = mgr }
+
+// SetOnClear runs after /clear resets the conversation. Use it to start a new saved session.
+func (m *Model) SetOnClear(fn func()) { m.onClear = fn }
+
+func (m *Model) clearConversation() {
+	if m.HistoryView != nil {
+		m.HistoryView.Clear()
+	}
+	m.streamBuf.Reset()
+	if m.Live != nil {
+		m.Live.ResetLiveStreaming()
+	}
+	m.lastError = ""
+	if m.convoMgr != nil {
+		m.convoMgr.Reset()
+	}
+	if m.onClear != nil {
+		m.onClear()
+	}
+}
 
 // SetGuardRisk allows external code (e.g. drover-guard, program.go, or event handlers)
 // to push real risk signals into the TUI so the StatusBar can reflect them.
@@ -1366,15 +1484,7 @@ func (m *Model) executePaletteAction(key string) tea.Cmd {
 		return nil
 
 	case "clear", "reset":
-		m.HistoryView.Clear()
-		m.streamBuf.Reset()
-		if m.Live != nil {
-			m.Live.ResetLiveStreaming()
-		}
-		m.lastError = ""
-		if m.convoMgr != nil {
-			m.convoMgr.Reset()
-		}
+		m.clearConversation()
 		return nil
 
 	case "tokens":

@@ -148,16 +148,18 @@ func marshalResponsesUser(m Message) []any {
 			results = append(results, b)
 		}
 	}
+	// Tool output comes first. A resumed prompt is another block on the same
+	// user turn, and it must not sit between a call and its result.
 	out := make([]any, 0, 1+len(results))
-	if text.Len() > 0 || len(results) == 0 {
-		out = append(out, map[string]any{"role": "user", "content": text.String()})
-	}
 	for _, r := range results {
 		out = append(out, map[string]any{
 			"type":    "function_call_output",
 			"call_id": r.ToolUseID,
 			"output":  responsesOutput(r),
 		})
+	}
+	if text.Len() > 0 || len(results) == 0 {
+		out = append(out, map[string]any{"role": "user", "content": text.String()})
 	}
 	return out
 }
@@ -248,18 +250,20 @@ func marshalOpenAIUserOrTool(m Message) []map[string]any {
 			results = append(results, b)
 		}
 	}
+	// Tool output comes first. A resumed prompt is another block on the same
+	// user turn, and it must not sit between a call and its result.
 	out := make([]map[string]any, 0, 1+len(results))
-	if text.Len() > 0 || len(results) == 0 {
-		out = append(out, map[string]any{
-			"role":    "user",
-			"content": text.String(),
-		})
-	}
 	for _, r := range results {
 		out = append(out, map[string]any{
 			"role":         "tool",
 			"tool_call_id": r.ToolUseID,
 			"content":      chatToolContent(r),
+		})
+	}
+	if text.Len() > 0 || len(results) == 0 {
+		out = append(out, map[string]any{
+			"role":    "user",
+			"content": text.String(),
 		})
 	}
 	return out

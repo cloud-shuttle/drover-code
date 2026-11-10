@@ -8,6 +8,9 @@ import (
 )
 
 func (m *Model) View() string {
+	if m.showingSessions {
+		return m.viewSessions()
+	}
 	if m.showingSearch && m.searchModel != nil {
 		return m.searchModel.View()
 	}
@@ -52,6 +55,11 @@ func (m *Model) View() string {
 
 	// dcode-003: StatusBar component is the source of truth
 	sections = append(sections, m.StatusBar.View())
+
+	if m.askUser != nil {
+		banner := "Question: " + m.askUser.Question + "\nEnter answers. Esc dismisses."
+		sections = append(sections, lipgloss.NewStyle().Foreground(colWarning).Width(m.width-2).Render(banner))
+	}
 
 	// dcode-007: prefer new PermissionPrompt components (old perm* render paths removed as dead code)
 	if m.PermPrompt != nil {

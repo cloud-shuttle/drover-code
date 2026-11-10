@@ -116,7 +116,17 @@ func (l sessionLog) finish(status string) {
 	l.append(sessionevent.TypeStatus, map[string]any{"status": status})
 }
 
+// stopBackground kills local background bash before os.Exit, which skips defers.
+var stopBackground func()
+
+func releaseBackground() {
+	if stopBackground != nil {
+		stopBackground()
+	}
+}
+
 func exitHeadless(code int, status string) {
+	releaseBackground()
 	headlessSession.finish(status)
 	os.Exit(code)
 }

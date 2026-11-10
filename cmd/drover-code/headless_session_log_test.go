@@ -8,6 +8,16 @@ import (
 	"github.com/cloudshuttle/drover-code/pkg/sessionevent"
 )
 
+func TestReleaseBackgroundCallsHook(t *testing.T) {
+	called := false
+	stopBackground = func() { called = true }
+	t.Cleanup(func() { stopBackground = nil })
+	releaseBackground()
+	if !called {
+		t.Fatal("background hook was not called")
+	}
+}
+
 func TestRecordSessionObserveWritesToolAndApproval(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	headlessSession = sessionLog{path: path, sessionID: "s1", issueID: "CLO-1", phase: "execute", envelope: true}

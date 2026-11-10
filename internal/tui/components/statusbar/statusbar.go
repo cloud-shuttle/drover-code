@@ -23,6 +23,9 @@ type StatusBar struct {
 	RiskReason   string // short explanation (e.g. "editing source files")
 	Paused       bool
 	PausedReason string // optional reason from /pause "reason"
+
+	BackgroundJobs int
+	PlanMode       bool
 }
 
 // New creates a new StatusBar.
@@ -47,6 +50,9 @@ func (s *StatusBar) View() string {
 	}
 
 	left := lipgloss.NewStyle().Foreground(styles.ColAccent).Bold(true).Render("◉ " + s.ModelName)
+	if s.PlanMode {
+		left += lipgloss.NewStyle().Foreground(styles.ColWarning).Bold(true).Render("  PLAN")
+	}
 
 	busy := ""
 	if s.AgentBusy {
@@ -61,16 +67,22 @@ func (s *StatusBar) View() string {
 			if len(short) > 22 {
 				short = short[:19] + "…"
 			}
-			paused += " " + lipgloss.NewStyle().Foreground(styles.ColMuted).Render("(" + short + ")")
+			paused += " " + lipgloss.NewStyle().Foreground(styles.ColMuted).Render("("+short+")")
 		}
 	}
 
 	risk := s.renderRisk()
 
-	right := fmt.Sprintf("%s  in:%d  out:%d%s%s",
+	bg := ""
+	if s.BackgroundJobs > 0 {
+		bg = fmt.Sprintf("  bg:%d", s.BackgroundJobs)
+	}
+
+	right := fmt.Sprintf("%s  in:%d  out:%d%s%s%s",
 		busy,
 		s.InputTokens,
 		s.OutputTokens,
+		bg,
 		risk,
 		paused,
 	)

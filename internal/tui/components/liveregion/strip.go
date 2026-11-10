@@ -32,6 +32,64 @@ func StripCursorPositionReports(s string) string {
 	}
 }
 
+// StripInputCursorReports cleans a whole input buffer. Cursor replies often
+// arrive one byte at a time, so pass the accumulated text, not the latest
+// rune. stored has complete reports removed. shown also drops a trailing
+// reply that is still arriving, so it does not hide every row while the
+// terminal finishes the sequence.
+func StripInputCursorReports(s string) (stored, shown string) {
+	stored = stripCompleteCursorReports(s)
+	shown = stripTrailingCursorPosition(stored)
+	return stored, shown
+}
+
+func stripCompleteCursorReports(s string) string {
+	s = StripCursorPositionReports(s)
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == '[' {
+			if end := scanCSIReportEnd(s, i+1); end > i {
+				i = end
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+func stripTrailingCursorPosition(s string) string {
+	if s == "" {
+		return s
+	}
+	i := len(s) - 1
+	if s[i] == '\\' || s[i] == 0x1b {
+		return s[:i]
+	}
+	for i >= 0 && s[i] >= '0' && s[i] <= '9' {
+		i--
+	}
+	if i >= 0 && s[i] == ';' {
+		i--
+		for i >= 0 && s[i] >= '0' && s[i] <= '9' {
+			i--
+		}
+	}
+	if i < 0 || s[i] != '[' {
+		return s
+	}
+	bracket := i
+	escaped := bracket > 0 && (s[bracket-1] == '\\' || s[bracket-1] == 0x1b)
+	if !escaped && !strings.Contains(s[bracket:], ";") {
+		return s
+	}
+	if escaped {
+		return s[:bracket-1]
+	}
+	return s[:bracket]
+}
+
 func scanCSIReportEnd(s string, start int) int {
 	i := start
 	for i < len(s) && s[i] >= '0' && s[i] <= '9' {

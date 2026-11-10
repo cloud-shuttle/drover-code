@@ -22,6 +22,15 @@ func TestStatusBar_View(t *testing.T) {
 			wantContains: []string{"claude-3-5-sonnet", "in:1234", "out:567"},
 		},
 		{
+			name: "plan mode",
+			bar: StatusBar{
+				ModelName: "sonnet",
+				PlanMode:  true,
+				Width:     80,
+			},
+			wantContains: []string{"sonnet", "PLAN"},
+		},
+		{
 			name: "busy state",
 			bar: StatusBar{
 				ModelName:    "claude-3-5-sonnet",

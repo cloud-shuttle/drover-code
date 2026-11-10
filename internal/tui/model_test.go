@@ -1258,6 +1258,151 @@ func TestModel_GuardRiskFromGuardError(t *testing.T) {
 	}
 }
 
+func TestBackgroundBash_QueuesBehindUserWhileBusy(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	m.agentBusy = true
+	m.InputArea.Queue("user typed this")
+
+	next, cmd := m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "Background command b1 finished."})
+	m = next.(*Model)
+	if cmd != nil {
+		t.Fatal("busy turn should keep the result queued")
+	}
+	got := m.InputArea.QueuedMessages()
+	if len(got) != 1 || got[0] != "user typed this" {
+		t.Fatalf("user queue = %#v", got)
+	}
+	if len(m.pendingBash) != 1 || !strings.Contains(m.pendingBash[0], "b1") {
+		t.Fatalf("pending = %#v", m.pendingBash)
+	}
+	if m.StatusBar.BackgroundJobs != 0 {
+		t.Fatalf("jobs = %d", m.StatusBar.BackgroundJobs)
+	}
+}
+
+func TestBackgroundBash_SurvivesTurnError(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var got string
+	m.SetRunFunc(func(input string) tea.Cmd {
+		got = input
+		return nil
+	})
+	m.agentBusy = true
+	m.turnOpen = true
+	next, cmd := m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "finished b1"})
+	m = next.(*Model)
+	if cmd != nil || len(m.pendingBash) != 1 {
+		t.Fatalf("cmd=%v pending=%#v", cmd, m.pendingBash)
+	}
+	next, _ = m.Update(agentMsg{event: agent.ErrorEvent{Err: errPlain{"boom"}}})
+	m = next.(*Model)
+	if len(m.pendingBash) != 1 {
+		t.Fatal("error cleared the background result")
+	}
+	next, _ = m.Update(agentRunCompleteMsg{err: errPlain{"boom"}})
+	m = next.(*Model)
+	if got != "finished b1" {
+		t.Fatalf("submitted %q", got)
+	}
+}
+
+func TestAgentRunComplete_IgnoresOlderRun(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	m.agentBusy = true
+	m.turnOpen = true
+	m.runGen = 2
+	m.pendingBash = []string{"finished b1"}
+	next, cmd := m.Update(agentRunCompleteMsg{gen: 1})
+	m = next.(*Model)
+	if cmd != nil || !m.agentBusy || !m.turnOpen || len(m.pendingBash) != 1 {
+		t.Fatalf("busy=%v open=%v pending=%#v cmd=%v", m.agentBusy, m.turnOpen, m.pendingBash, cmd)
+	}
+}
+
+func TestBackgroundBash_SubmitsWhenIdle(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var got string
+	m.SetRunFunc(func(input string) tea.Cmd {
+		got = input
+		return nil
+	})
+
+	next, cmd := m.Update(BackgroundBashMsg{Running: 1})
+	m = next.(*Model)
+	if cmd != nil || m.StatusBar.BackgroundJobs != 1 {
+		t.Fatalf("start notice cmd=%v jobs=%d", cmd, m.StatusBar.BackgroundJobs)
+	}
+
+	next, _ = m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "done-text"})
+	m = next.(*Model)
+	if got != "done-text" {
+		t.Fatalf("submitted %q", got)
+	}
+	if !m.agentBusy || m.StatusBar.BackgroundJobs != 0 {
+		t.Fatalf("busy=%v jobs=%d", m.agentBusy, m.StatusBar.BackgroundJobs)
+	}
+}
+
+func TestBackgroundBash_DoesNotResumePausedAgent(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var called bool
+	m.SetRunFunc(func(string) tea.Cmd {
+		called = true
+		return nil
+	})
+	m.StatusBar.Paused = true
+
+	next, cmd := m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "finished b1"})
+	m = next.(*Model)
+	if called || cmd != nil {
+		t.Fatal("paused agent resumed")
+	}
+	if !m.StatusBar.Paused {
+		t.Fatal("pause cleared")
+	}
+	turns := m.HistoryView.GetTurns()
+	if len(turns) == 0 || turns[len(turns)-1].Content != "finished b1" {
+		t.Fatalf("turns = %#v", turns)
+	}
+}
+
+func TestBackgroundBash_CancelDoesNotSubmitPending(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var called bool
+	m.SetRunFunc(func(string) tea.Cmd {
+		called = true
+		return nil
+	})
+	m.agentBusy = true
+	m.turnOpen = true
+	m.runGen = 1
+	m.pendingBash = []string{"finished b1"}
+
+	next, cmd := m.Update(agentRunCompleteMsg{err: context.Canceled, gen: 1})
+	m = next.(*Model)
+	if called || cmd != nil {
+		t.Fatal("cancel resumed from the background result")
+	}
+	if !m.StatusBar.Paused || len(m.pendingBash) != 0 {
+		t.Fatalf("paused=%v pending=%#v", m.StatusBar.Paused, m.pendingBash)
+	}
+	var saw bool
+	for _, turn := range m.HistoryView.GetTurns() {
+		if turn.Content == "finished b1" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Fatal("background result was not kept as a note")
+	}
+}
+
 // TestModel_PaletteRegistrationAPI verifies the expanded Command Palette
 // extension points (static + dynamic providers + action handlers).
 func TestModel_PaletteRegistrationAPI(t *testing.T) {

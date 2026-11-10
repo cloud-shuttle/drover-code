@@ -1,11 +1,48 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestSettings_ThemeStringAndObject(t *testing.T) {
+	var dark Settings
+	if err := json.Unmarshal([]byte(`{"model":"claude-x","theme":"dark"}`), &dark); err != nil {
+		t.Fatal(err)
+	}
+	if dark.Model != "claude-x" || dark.Theme.Mode != "dark" {
+		t.Fatalf("string theme: %+v", dark.Theme)
+	}
+
+	var obj Settings
+	if err := json.Unmarshal([]byte(`{"theme":{"mode":"light","palette":"high-contrast","colors":{"accent":"#fff"}}}`), &obj); err != nil {
+		t.Fatal(err)
+	}
+	if obj.Theme.Mode != "light" || obj.Theme.Palette != "high-contrast" || obj.Theme.Colors["accent"] != "#fff" {
+		t.Fatalf("object theme: %+v", obj.Theme)
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	proj := filepath.Join(home, "proj")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(`{"model":"from-global","theme":"dark"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l := NewLoader(proj)
+	if err := l.Load(); err != nil {
+		t.Fatal(err)
+	}
+	got := l.Get()
+	if got.Model != "from-global" || got.Theme.Mode != "dark" {
+		t.Fatalf("loaded %+v", got.Theme)
+	}
+}
 
 func TestLoader_MergeOrder_ProjectWins(t *testing.T) {
 	home := t.TempDir()

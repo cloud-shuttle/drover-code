@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,9 +29,16 @@ import (
 	github "github.com/cloudshuttle/drover-code/internal/github"
 	"github.com/cloudshuttle/drover-code/internal/mcp"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
+	"github.com/cloudshuttle/drover-code/internal/session"
 	"github.com/cloudshuttle/drover-code/internal/skills"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
+	askpkg "github.com/cloudshuttle/drover-code/internal/tools/ask"
+	browserpkg "github.com/cloudshuttle/drover-code/internal/tools/browser"
+	delegatepkg "github.com/cloudshuttle/drover-code/internal/tools/delegate"
+	explorepkg "github.com/cloudshuttle/drover-code/internal/tools/explore"
+	fspkg "github.com/cloudshuttle/drover-code/internal/tools/fs"
+	shellpkg "github.com/cloudshuttle/drover-code/internal/tools/shell"
 	todopkg "github.com/cloudshuttle/drover-code/internal/tools/todo"
 	webpkg "github.com/cloudshuttle/drover-code/internal/tools/web"
 	"github.com/cloudshuttle/drover-code/internal/tui"
@@ -129,6 +137,27 @@ func main() {
 	if startupFlags.Verbose {
 		settings.Verbose = true
 	}
+	if sessionResumeRequested() && !localSessionEnabled(settings) {
+		fmt.Fprintln(os.Stderr, "drover-code: -c and --resume are for the local TUI and headless run")
+		os.Exit(2)
+	}
+	var sessionPicker []tui.SessionRow
+	if startupFlags.ResumeList && startupFlags.ResumeID == "" {
+		if wantsHeadlessMode() {
+			printSessionList(workDir)
+			return
+		}
+		rows, err := listSavedSessions(workDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "drover-code: %v\n", err)
+			os.Exit(2)
+		}
+		if len(rows) == 0 {
+			fmt.Println("No saved sessions in this directory yet. A session is stored after the first completed reply. Quit, then run drover-code -c or drover-code --resume.")
+			return
+		}
+		sessionPicker = rows
+	}
 
 	modelStr := coalesce(os.Getenv("ANTHROPIC_MODEL"), settings.Model, defaultModel)
 	if api.ProviderFromEnv() == api.ProtocolOpenAI {
@@ -147,13 +176,65 @@ func main() {
 	registry := tools.NewRegistry()
 	tools.RegisterAll(registry, workDir)
 	registerLocalHarness(registry, workDir)
+	if localSessionEnabled(settings) {
+		if b, ok := registry.Get("bash").(*shellpkg.Bash); ok {
+			b.AllowBackground = true
+			if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+				b.Sandbox = true
+			}
+		}
+		// ponytail: explore and delegate use the process client, not a later Loop.SetDriver override; follow that override when a command must run on its own model.
+		registry.Register(&explorepkg.Agent{
+			Ask: func(ctx context.Context, task string) (string, error) {
+				return agent.Explore(ctx, agent.NewAnthropicInferenceDriver(client), workDir, task)
+			},
+		})
+		registry.Register(&delegatepkg.Agent{
+			Ask: func(ctx context.Context, task string) (string, error) {
+				return agent.Delegate(ctx, agent.NewAnthropicInferenceDriver(client), workDir, task, agent.DelegateOpts{
+					Sandbox: runtime.GOOS == "darwin" || runtime.GOOS == "linux",
+					Gopls:   true,
+				})
+			},
+		})
+		br := &browserpkg.Browser{}
+		registry.Register(br)
+		defer br.Close()
+		if w, ok := registry.Get("write_file").(*fspkg.WriteFile); ok {
+			w.Gopls = true
+		}
+		if e, ok := registry.Get("edit_file").(*fspkg.EditFile); ok {
+			e.Gopls = true
+		}
+		prompt := mgr.SystemPrompt() + "\n\nexplore searches this tree in a separate read-only pass and returns only a short file map. Use it for a broad question about where code lives. Do not use it to edit files or run commands.\n\ndelegate runs one coding task in a separate loop and returns a short result. Use it for a chunk of work that would flood this conversation. The child can read, edit, and run bash. It cannot ask the user or start another delegate.\n\nbrowser opens a local headless Chrome. Use open, then snapshot, click, type, or screenshot. It can reach the network. bash cannot. Pages are http and https.\n\nAfter write_file or edit_file changes a .go file, the tool result includes gopls errors and warnings for that file.\n"
+		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+			prompt += "\nbash is sandboxed in this session. It can read files and write only inside the working tree and a private temp directory. Network is blocked, so downloads and package fetches fail.\n"
+		}
+		mgr.SetSystemPrompt(prompt)
+	}
 
 	dreamStore, dreamWorker := setupDream(settings, workDir, client)
 
 	lf := telemetry.New(telemetry.ConfigFromEnv())
 	defer lf.Flush()
 
-	sessionID := fmt.Sprintf("session-%x", time.Now().UnixNano())
+	sessionID := session.NewID()
+	var rec *session.Recorder
+	if localSessionEnabled(settings) {
+		store := session.Open(session.DefaultRoot())
+		if len(sessionPicker) == 0 && (startupFlags.ResumeID != "" || startupFlags.Continue) {
+			tr, err := loadSavedSession(store, workDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "drover-code: %v\n", err)
+				os.Exit(2)
+			}
+			for _, msg := range tr.Messages {
+				mgr.Append(msg)
+			}
+			sessionID = tr.ID
+		}
+		rec = session.NewRecorder(store, sessionID, workDir, mgr.Messages)
+	}
 	baseCtx := telemetry.WithSessionID(context.Background(), sessionID)
 
 	// Phase 4: Linear Telemetry Context
@@ -187,7 +268,7 @@ func main() {
 	// a shell profile or project settings can accidentally force the wrong mode.
 	switch {
 	case wantsHeadlessMode():
-		runHeadless(ctx, client, mgr, registry, settings, workDir, dreamWorker, cmdExecutor)
+		runHeadless(ctx, client, mgr, registry, settings, workDir, dreamWorker, cmdExecutor, rec)
 
 	case envTruthy("DROVER_CODE_IDE_BRIDGE"):
 		runBridgeMode(ctx, client, mgr, registry, settings, workDir, dreamWorker)
@@ -199,7 +280,7 @@ func main() {
 		runCoordinatorMode(ctx, client, registry, modelStr, workDir, settings, dreamWorker)
 
 	default:
-		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore, cmdExecutor, themeSaveFn, mcpNotes)
+		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore, cmdExecutor, themeSaveFn, mcpNotes, rec, sessionPicker)
 	}
 }
 
@@ -260,6 +341,8 @@ func runTUI(
 	cmdExec *commands.Executor,
 	themeSaveFn func(mode, palette string) error,
 	notes []string,
+	rec *session.Recorder,
+	picker []tui.SessionRow,
 ) {
 	if ds != nil {
 		if inj := dream.BuildInjection(ds, 5); inj != "" {
@@ -270,9 +353,42 @@ func runTUI(
 		dw.Start(ctx)
 	}
 
+	mgr.SetSystemPrompt(mgr.SystemPrompt() + "\n\nask_user asks the person one question and waits for their typed answer. Use it when you need a decision you cannot infer. One question at a time.\n")
 	prog := tui.NewProgram(ctx, client, mgr, registry, modelStr, settings, workDir, cmdExec, themeSaveFn)
-	for _, note := range notes {
-		prog.Note(note)
+	registry.Register(&askpkg.User{Ask: prog.AskUser})
+	if b, ok := registry.Get("bash").(*shellpkg.Bash); ok && b.AllowBackground {
+		b.SetOnDone(func(n shellpkg.Notice) {
+			prog.Send(tui.BackgroundBashMsg{Running: n.Running, Output: n.Output, Done: n.Done})
+		})
+		defer b.StopAll()
+	}
+	if rec != nil {
+		prog.SetPersist(rec.Save)
+		prog.SetOnClear(rec.Rotate)
+		if len(mgr.Messages()) > 0 {
+			prog.Restore(mgr.Messages(), "Continued session "+rec.ID())
+		}
+	}
+	if len(picker) > 0 && rec != nil {
+		store := session.Open(session.DefaultRoot())
+		prog.OfferSessions(picker, notes, func(id string) (string, []api.Message, error) {
+			tr, err := store.Load(workDir, id)
+			if err != nil {
+				return "", nil, err
+			}
+			tr.Messages = session.CloseDangling(tr.Messages)
+			mgr.Reset()
+			for _, msg := range tr.Messages {
+				mgr.Append(msg)
+			}
+			rec.Use(tr.ID)
+			return tr.ID, mgr.Messages(), nil
+		})
+	}
+	if len(picker) == 0 {
+		for _, note := range notes {
+			prog.Note(note)
+		}
 	}
 	if err := prog.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -381,6 +497,7 @@ func runHeadless(
 	workDir string,
 	dw *dream.Worker,
 	cmdExec *commands.Executor,
+	rec *session.Recorder,
 ) {
 	ctx, cancelTimeout := headlessTimeout(ctx)
 	defer cancelTimeout()
@@ -390,6 +507,25 @@ func runHeadless(
 	driver := agent.NewAnthropicInferenceDriver(client)
 	executor := agent.NewDefaultToolExecutor(registry, eng, eventCh)
 	loop := agent.NewLoop(driver, mgr, executor, registry, eventCh)
+	var bashTool *shellpkg.Bash
+	backgroundDone := make(chan shellpkg.Notice, 16)
+	if b, ok := registry.Get("bash").(*shellpkg.Bash); ok && b.AllowBackground {
+		bashTool = b
+		b.SetOnDone(func(n shellpkg.Notice) {
+			if n.Done {
+				backgroundDone <- n
+			}
+		})
+		stopBackground = b.StopAll
+		defer func() { stopBackground = nil }()
+		defer b.StopAll()
+	}
+	if rec != nil {
+		loop.SetPersist(rec.Save)
+		if len(mgr.Messages()) > 0 {
+			fmt.Fprintf(os.Stderr, "drover-code: continuing %s\n", rec.ID())
+		}
+	}
 	config.ApplyAgentLoopOptions(loop, settings)
 	if n := headlessMaxSessionTokens(); n > 0 {
 		loop.SetMaxSessionTokens(n)
@@ -504,6 +640,18 @@ func runHeadless(
 			fmt.Fprintf(os.Stderr, "drover-code: agent error: %v\n", err)
 			return true
 		}
+		for {
+			n, err := feedBackgroundResults(ctx, loop, bashTool, backgroundDone)
+			sumTurns += n
+			if err == nil {
+				break
+			}
+			hadErr = true
+			lastAgentErr = err
+			exitCode = headlessExitCode(err)
+			fmt.Fprintf(os.Stderr, "drover-code: agent error: %v\n", err)
+			return true
+		}
 		return false
 	}
 
@@ -565,6 +713,46 @@ func runHeadless(
 		exitHeadless(1, "failed")
 	}
 	headlessSession.finish("completed")
+}
+
+func feedBackgroundResults(ctx context.Context, loop *agent.Loop, bashTool *shellpkg.Bash, done <-chan shellpkg.Notice) (int, error) {
+	if bashTool == nil {
+		return 0, nil
+	}
+	var turns int
+	for {
+		if bashTool.Running() == 0 {
+			select {
+			case res := <-done:
+				n, err := runBackgroundResult(ctx, loop, res)
+				turns += n
+				if err != nil {
+					return turns, err
+				}
+				continue
+			default:
+				return turns, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			bashTool.StopAll()
+			return turns, ctx.Err()
+		case res := <-done:
+			n, err := runBackgroundResult(ctx, loop, res)
+			turns += n
+			if err != nil {
+				return turns, err
+			}
+		}
+	}
+}
+
+func runBackgroundResult(ctx context.Context, loop *agent.Loop, res shellpkg.Notice) (int, error) {
+	fmt.Fprintf(os.Stderr, "\n%s\n", res.Output)
+	headlessSession.userMessage(res.Output)
+	err := loop.Run(ctx, res.Output)
+	return loop.LastRunTurns(), err
 }
 
 func headlessExitCode(err error) int {
@@ -1037,6 +1225,83 @@ func headlessUseJSONL() bool {
 	}
 	// Pipe / redirect → JSONL; interactive terminal → plain text on stdout.
 	return (stat.Mode() & os.ModeCharDevice) == 0
+}
+
+func sessionResumeRequested() bool {
+	return startupFlags.Continue || startupFlags.ResumeID != "" || startupFlags.ResumeList
+}
+
+func localSessionEnabled(settings config.Settings) bool {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("DROVER_CODE_PERMISSION_PRESET")), permissions.PresetUnikernel) {
+		return false
+	}
+	if startupFlags.CloudMode || startupFlags.CoordinatorRemote {
+		return false
+	}
+	if envTruthy("DROVER_CODE_IDE_BRIDGE") || envTruthy("DROVER_CODE_COORDINATOR_MODE") {
+		return false
+	}
+	if settings.CoordinatorMode || settings.CoordinatorRemote {
+		return false
+	}
+	return true
+}
+
+func loadSavedSession(store *session.Store, workDir string) (session.Transcript, error) {
+	var (
+		tr  session.Transcript
+		err error
+	)
+	if startupFlags.ResumeID != "" {
+		tr, err = store.Load(workDir, startupFlags.ResumeID)
+	} else {
+		tr, err = store.LoadLatest(workDir)
+	}
+	if err != nil {
+		return session.Transcript{}, err
+	}
+	tr.Messages = session.CloseDangling(tr.Messages)
+	return tr, nil
+}
+
+func listSavedSessions(workDir string) ([]tui.SessionRow, error) {
+	root := session.DefaultRoot()
+	if root == "" {
+		return nil, fmt.Errorf("cannot find the home directory for saved sessions")
+	}
+	rows, err := session.Open(root).List(workDir, 20)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]tui.SessionRow, len(rows))
+	for i, row := range rows {
+		out[i] = tui.SessionRow{
+			ID:      row.ID,
+			When:    row.Updated.Local().Format("2006-01-02 15:04"),
+			Preview: row.Preview,
+		}
+	}
+	return out, nil
+}
+
+func printSessionList(workDir string) {
+	root := session.DefaultRoot()
+	if root == "" {
+		fmt.Fprintln(os.Stderr, "drover-code: cannot find the home directory for saved sessions")
+		os.Exit(2)
+	}
+	rows, err := session.Open(root).List(workDir, 20)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "drover-code: %v\n", err)
+		os.Exit(2)
+	}
+	if len(rows) == 0 {
+		fmt.Println("No saved sessions in this directory yet. A session is stored after the first completed reply. Quit, then run drover-code -c or drover-code --resume.")
+		return
+	}
+	for _, row := range rows {
+		fmt.Printf("%s  %s  %s\n", row.ID, row.Updated.Local().Format("2006-01-02 15:04"), row.Preview)
+	}
 }
 
 // wantsHeadlessMode returns true when headless (non-TUI) execution is requested.

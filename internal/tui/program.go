@@ -2,11 +2,13 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -25,12 +27,50 @@ import (
 )
 
 type Program struct {
-	tea     *tea.Program
-	model   *Model
-	loop    *agent.Loop
-	eventCh chan agent.Event
-	ctx     context.Context
-	cancel  context.CancelFunc
+	tea         *tea.Program
+	model       *Model
+	loop        *agent.Loop
+	eventCh     chan agent.Event
+	ctx         context.Context
+	cancel      context.CancelFunc
+	resumeNotes []string
+	askMu       sync.Mutex
+}
+
+// AskUser shows one question in the TUI and waits for a typed answer.
+// ponytail: one question at a time; a form when a second question must be asked together.
+func (p *Program) AskUser(ctx context.Context, question string) (string, error) {
+	if p == nil || p.eventCh == nil || p.ctx == nil {
+		return "", errors.New("not available in this session")
+	}
+	p.askMu.Lock()
+	defer p.askMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	reply := make(chan agent.AskUserReply, 1)
+	select {
+	case p.eventCh <- agent.AskUserEvent{Question: question, ReplyCh: reply}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-p.ctx.Done():
+		return "", p.ctx.Err()
+	}
+	select {
+	case r := <-reply:
+		if !r.OK {
+			return "", errors.New("the user dismissed the question")
+		}
+		text := strings.TrimSpace(r.Text)
+		if text == "" {
+			return "", errors.New("empty answer")
+		}
+		return text, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-p.ctx.Done():
+		return "", p.ctx.Err()
+	}
 }
 
 func NewProgram(
@@ -76,6 +116,7 @@ func NewProgram(
 	}
 	model := New(eventCh, modelName, workDir, userName, hostName)
 	model.SetConversation(convoMgr)
+	wirePlanMode(model, eng, convoMgr)
 
 	p := &Program{
 		loop:    loop,
@@ -329,6 +370,68 @@ func (p *Program) Note(text string) {
 		return
 	}
 	p.model.HistoryView.AppendTurn(core.RenderedTurn{Role: "system", Content: text})
+}
+
+// Send delivers a message to the running TUI.
+func (p *Program) Send(msg tea.Msg) {
+	if p == nil || p.tea == nil || msg == nil {
+		return
+	}
+	p.tea.Send(msg)
+}
+
+// SetPersist saves the conversation after each completed message in the loop.
+func (p *Program) SetPersist(fn func()) {
+	if p != nil && p.loop != nil {
+		p.loop.SetPersist(fn)
+	}
+}
+
+// SetOnClear starts a fresh saved session when the operator clears the chat.
+func (p *Program) SetOnClear(fn func()) {
+	if p != nil && p.model != nil {
+		p.model.SetOnClear(fn)
+	}
+}
+
+// OfferSessions opens the resume picker. load receives the chosen id.
+func (p *Program) OfferSessions(rows []SessionRow, notes []string, load func(id string) (string, []api.Message, error)) {
+	if p == nil || p.model == nil || len(rows) == 0 || load == nil {
+		return
+	}
+	p.resumeNotes = append([]string(nil), notes...)
+	p.model.showingSessions = true
+	p.model.sessionRows = append([]SessionRow(nil), rows...)
+	p.model.sessionCursor = 0
+	p.model.sessionQuery = ""
+	p.model.loadSession = func(id string) error {
+		fullID, msgs, err := load(id)
+		if err != nil {
+			return err
+		}
+		p.model.showingSessions = false
+		p.Restore(msgs, "Continued session "+fullID)
+		for _, note := range p.resumeNotes {
+			p.Note(note)
+		}
+		return nil
+	}
+}
+
+// Restore paints a saved transcript before the first prompt.
+func (p *Program) Restore(msgs []api.Message, note string) {
+	if p == nil || p.model == nil || p.model.HistoryView == nil {
+		return
+	}
+	turns := turnsFromMessages(msgs)
+	if strings.TrimSpace(note) != "" {
+		turns = append(turns, core.RenderedTurn{Role: "system", Content: note})
+	}
+	if len(turns) == 0 {
+		return
+	}
+	p.model.HistoryView.SetTurns(turns)
+	p.model.HistoryView.GotoBottom()
 }
 
 func (p *Program) Run() error {

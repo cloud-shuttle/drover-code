@@ -106,6 +106,21 @@ const (
 func (PermissionRequestEvent) isAgentEvent()      {}
 func (PermissionBatchRequestEvent) isAgentEvent() {}
 
+// AskUserEvent is emitted by ask_user. The TUI shows Question and sends one
+// reply. OK false means the person dismissed it.
+type AskUserEvent struct {
+	Question string
+	ReplyCh  chan<- AskUserReply
+}
+
+// AskUserReply is the person's answer.
+type AskUserReply struct {
+	Text string
+	OK   bool
+}
+
+func (AskUserEvent) isAgentEvent() {}
+
 // UsageEvent carries token consumption for the last API call.
 // Emitted after each streaming response completes.
 type UsageEvent struct {

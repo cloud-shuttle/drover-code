@@ -45,4 +45,17 @@ func TestParseCLIFlags(t *testing.T) {
 	if err != nil || f.ResultJSON != "/x.json" {
 		t.Fatalf("got %+v err=%v", f, err)
 	}
+
+	f, err = parseCLIFlags([]string{"-c", "--resume"})
+	if err != nil || !f.Continue || !f.ResumeList || f.ResumeID != "" {
+		t.Fatalf("list flags: %+v err=%v", f, err)
+	}
+	f, err = parseCLIFlags([]string{"--resume", "session-abc", "-p", "next"})
+	if err != nil || f.ResumeID != "session-abc" || f.Prompt != "next" || f.ResumeList {
+		t.Fatalf("resume id: %+v err=%v", f, err)
+	}
+	f, err = parseCLIFlags([]string{"--resume=session-def"})
+	if err != nil || f.ResumeID != "session-def" {
+		t.Fatalf("resume equals: %+v err=%v", f, err)
+	}
 }

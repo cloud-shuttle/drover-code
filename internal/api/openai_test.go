@@ -207,6 +207,29 @@ func TestMarshalOpenAIMessages_ToolsAndResults(t *testing.T) {
 	}
 }
 
+func TestMarshalUserFollowUpFollowsToolResult(t *testing.T) {
+	msg := Message{
+		Role: RoleUser,
+		Content: []ContentBlock{
+			ToolResultBlock{ToolUseID: "call_1", Content: "pong"},
+			TextBlock{Text: "continue"},
+		},
+	}
+	chat := marshalOpenAIUserOrTool(msg)
+	if len(chat) != 2 || chat[0]["role"] != "tool" || chat[1]["role"] != "user" || chat[1]["content"] != "continue" {
+		t.Fatalf("chat = %#v", chat)
+	}
+	responses := marshalResponsesUser(msg)
+	if len(responses) != 2 {
+		t.Fatalf("responses len = %d", len(responses))
+	}
+	first, _ := responses[0].(map[string]any)
+	second, _ := responses[1].(map[string]any)
+	if first["type"] != "function_call_output" || second["role"] != "user" || second["content"] != "continue" {
+		t.Fatalf("responses = %#v", responses)
+	}
+}
+
 func TestClient_StreamMessage_OpenAIHeadersAndBody(t *testing.T) {
 	var (
 		gotPath    string

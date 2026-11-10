@@ -49,12 +49,19 @@ func TestHandleBuiltinSlash_clearResetsConvo(t *testing.T) {
 	mgr.Append(api.UserMessage("hello"))
 	m.SetConversation(mgr)
 
+	cleared := false
+	m.SetOnClear(func() {
+		cleared = len(mgr.Messages()) == 0
+	})
 	_, ok := m.handleBuiltinSlash("/clear")
 	if !ok {
 		t.Fatal("expected handled")
 	}
 	if len(mgr.Messages()) != 0 {
 		t.Fatalf("messages should clear, got %d", len(mgr.Messages()))
+	}
+	if !cleared {
+		t.Fatal("onClear should run after the conversation is empty")
 	}
 }
 

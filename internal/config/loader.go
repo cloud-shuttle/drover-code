@@ -63,12 +63,15 @@ type Settings struct {
 	DreamMaxRetentionEntries   int                        `json:"dreamMaxRetentionEntries,omitempty"`
 	DreamMaxRetentionAgeDays   int                        `json:"dreamMaxRetentionAgeDays,omitempty"`
 
-	// Theme configuration (foundation for TUI Theme System roadmap item)
-	Theme struct {
-		Mode    string            `json:"mode,omitempty"`    // "auto", "light", "dark"
-		Palette string            `json:"palette,omitempty"` // named palette e.g. "default", "high-contrast"
-		Colors  map[string]string `json:"colors,omitempty"`  // custom color overrides (future)
-	} `json:"theme,omitempty"`
+	// Theme accepts Claude's string form ("dark") and the object form.
+	Theme ThemeConfig `json:"theme,omitempty"`
+}
+
+// ThemeConfig is the TUI theme. Mode is auto, light, or dark.
+type ThemeConfig struct {
+	Mode    string            `json:"mode,omitempty"`
+	Palette string            `json:"palette,omitempty"`
+	Colors  map[string]string `json:"colors,omitempty"`
 }
 
 // Loader manages settings loading and CLAUDE.md injection.
