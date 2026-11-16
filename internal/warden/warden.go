@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 	otellogglobal "go.opentelemetry.io/otel/log/global"
 
@@ -223,28 +224,28 @@ func emitWardenDecisionAsOTELLog(ctx context.Context, checkType string, req *war
 
 	rec := otellog.Record{}
 	rec.SetTimestamp(time.Now())
-	rec.SetBody(otellog.StringValue("Warden semantic decision"))
+	rec.SetBody(attribute.StringValue("Warden semantic decision"))
 
 	rec.AddAttributes(
-		otellog.String("drover.warden.check_type", checkType),
-		otellog.Bool("drover.warden.allowed", dec.Allowed),
-		otellog.String("drover.warden.reason", dec.Result.Reason),
-		otellog.String("drover.warden.result", dec.Result.Result),
-		otellog.Int64("drover.warden.latency_ms", dec.Result.LatencyMS),
-		otellog.String("drover.warden.bead_id", dec.Result.BeadID),
+		attribute.String("drover.warden.check_type", checkType),
+		attribute.Bool("drover.warden.allowed", dec.Allowed),
+		attribute.String("drover.warden.reason", dec.Result.Reason),
+		attribute.String("drover.warden.result", dec.Result.Result),
+		attribute.Int64("drover.warden.latency_ms", dec.Result.LatencyMS),
+		attribute.String("drover.warden.bead_id", dec.Result.BeadID),
 	)
 
 	if req.TenantID != "" {
-		rec.AddAttributes(otellog.String("drover.tenant_id", req.TenantID))
+		rec.AddAttributes(attribute.String("drover.tenant_id", req.TenantID))
 	}
 	if jobID := getEnvOrContext(ctx, "DROVER_JOB_ID"); jobID != "" {
-		rec.AddAttributes(otellog.String("drover.job_id", jobID))
+		rec.AddAttributes(attribute.String("drover.job_id", jobID))
 	}
 	if agentID := getEnvOrContext(ctx, "DROVER_AGENT_ID"); agentID != "" {
-		rec.AddAttributes(otellog.String("drover.agent_id", agentID))
+		rec.AddAttributes(attribute.String("drover.agent_id", agentID))
 	}
 	if req.ToolCall != nil && req.ToolCall.ToolName != "" {
-		rec.AddAttributes(otellog.String("drover.warden.tool_name", req.ToolCall.ToolName))
+		rec.AddAttributes(attribute.String("drover.warden.tool_name", req.ToolCall.ToolName))
 	}
 
 	logger.Emit(ctx, rec)
