@@ -1,3 +1,14 @@
+---
+title: "14 — UX, perceived pauses, and memory"
+description: "Architecture decision record: 14 — UX, perceived pauses, and memory."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 14 — UX, perceived pauses, and memory
 
 **Status:** Phases **A–C** and most of **B** are implemented in code; **D** is partial; **E** is optional env-tunable (see below). Dream store supports **opt-in SQLite** via env.

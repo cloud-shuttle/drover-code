@@ -1,3 +1,14 @@
+---
+title: "09 — Advanced Systems: Dream Memory and Coordinator"
+description: "Architecture decision record: 09 — Advanced Systems: Dream Memory and Coordinator."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 09 — Advanced Systems: Dream Memory and Coordinator
 
 **Packages:** `internal/dream`, `internal/coordinator`  

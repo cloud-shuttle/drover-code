@@ -1,3 +1,14 @@
+---
+title: "07 — Terminal UI: BubbleTea"
+description: "Architecture decision record: 07 — Terminal UI: BubbleTea."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 07 — Terminal UI: BubbleTea
 
 **Package:** `internal/tui`  

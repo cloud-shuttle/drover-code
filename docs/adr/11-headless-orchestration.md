@@ -1,3 +1,14 @@
+---
+title: "11 — Headless mode and orchestrated execution (Drover × Unikraft unikernels)"
+description: "Architecture decision record: 11 — Headless mode and orchestrated execution (Drover × Unikraft unikernels)."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 11 — Headless mode and orchestrated execution (Drover × Unikraft unikernels)
 
 **Entrypoint:** `cmd/drover-code`  

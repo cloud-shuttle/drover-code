@@ -1,3 +1,14 @@
+---
+title: "Custom Commands Infrastructure"
+description: "Architecture decision record: Custom Commands Infrastructure."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Custom Commands Infrastructure
 
 ## Overview

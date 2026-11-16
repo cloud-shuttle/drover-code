@@ -1,3 +1,14 @@
+---
+title: "Drover-Code TUI Roadmap 2026: \"From Powerful to World-Class\""
+description: "Architecture decision record: Drover-Code TUI Roadmap 2026: \"From Powerful to World-Class\"."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Drover-Code TUI Roadmap 2026: "From Powerful to World-Class"
 
 **Vision:** Build the most reliable, governed, and professional AI agent Terminal User Interface (TUI)—while matching or exceeding the creativity and fluidity of tools like Pi.

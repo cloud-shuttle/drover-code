@@ -1,3 +1,14 @@
+---
+title: "02 — Agent Loop: Conversation Manager, Agent Loop, and Event System"
+description: "Architecture decision record: 02 — Agent Loop: Conversation Manager, Agent Loop, and Event System."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 02 — Agent Loop: Conversation Manager, Agent Loop, and Event System
 
 **Packages:** `internal/convo`, `internal/agent`  

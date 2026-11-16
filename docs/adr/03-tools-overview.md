@@ -1,3 +1,14 @@
+---
+title: "03 — Tools Overview: Interface, Registry, and toolutil"
+description: "Architecture decision record: 03 — Tools Overview: Interface, Registry, and toolutil."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 03 — Tools Overview: Interface, Registry, and toolutil
 
 **Packages:** `internal/tools`, `internal/tools/toolutil`  

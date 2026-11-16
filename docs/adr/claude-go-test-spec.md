@@ -1,3 +1,14 @@
+---
+title: "claude-go-test-spec"
+description: "Architecture decision record: claude-go-test-spec."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 ## drover-code — Test Specification
 
 This document describes the automated tests we implement before wiring a real `ANTHROPIC_API_KEY`.

@@ -1,3 +1,14 @@
+---
+title: "Drover-Code TUI Test Strategy"
+description: "Architecture decision record: Drover-Code TUI Test Strategy."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Drover-Code TUI Test Strategy
 
 **Version:** 1.0  

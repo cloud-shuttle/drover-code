@@ -1,3 +1,14 @@
+---
+title: "04 — File System Tools"
+description: "Architecture decision record: 04 — File System Tools."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 04 — File System Tools
 
 **Package:** `internal/tools/fs`  

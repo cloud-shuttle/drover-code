@@ -1,3 +1,14 @@
+---
+title: "05 — Shell and Search Tools: bash, glob, grep"
+description: "Architecture decision record: 05 — Shell and Search Tools: bash, glob, grep."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 05 — Shell and Search Tools: bash, glob, grep
 
 **Package:** `internal/tools/shell`, `internal/tools/search`  

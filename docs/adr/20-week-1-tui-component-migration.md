@@ -1,3 +1,14 @@
+---
+title: "Week 1: TUI Component Foundation + Polish — Detailed Task List"
+description: "Architecture decision record: Week 1: TUI Component Foundation + Polish — Detailed Task List."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # Week 1: TUI Component Foundation + Polish — Detailed Task List
 
 **Goal**  

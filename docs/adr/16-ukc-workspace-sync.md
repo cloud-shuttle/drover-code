@@ -1,3 +1,14 @@
+---
+title: "16 — UKC Remote Workspace Synchronization"
+description: "Architecture decision record: 16 — UKC Remote Workspace Synchronization."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 16 — UKC Remote Workspace Synchronization
 
 **Entrypoint:** `cmd/drover-code` (Coordinator Mode)  

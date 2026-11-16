@@ -1,3 +1,14 @@
+---
+title: "12 — Property-based checks and fuzzing"
+description: "Architecture decision record: 12 — Property-based checks and fuzzing."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 12 — Property-based checks and fuzzing
 
 **Status:** Implemented  

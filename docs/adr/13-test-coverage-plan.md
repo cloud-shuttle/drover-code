@@ -1,3 +1,14 @@
+---
+title: "13 — Test coverage plan"
+description: "Architecture decision record: 13 — Test coverage plan."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 13 — Test coverage plan
 
 **Status:** In progress (Phases 1–5 materially implemented; iterate on remaining gaps)  

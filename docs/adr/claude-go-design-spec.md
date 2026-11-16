@@ -1,3 +1,14 @@
+---
+title: "drover-code: Go Port of Claude Code — Design Specification"
+description: "Architecture decision record: drover-code: Go Port of Claude Code — Design Specification."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # drover-code: Go Port of Claude Code — Design Specification
 
 **Version:** 1.0  

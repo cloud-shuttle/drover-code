@@ -1,3 +1,14 @@
+---
+title: "06 — Git Tools and web_fetch"
+description: "Architecture decision record: 06 — Git Tools and web_fetch."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 06 — Git Tools and web_fetch
 
 **Package:** `internal/tools/git`, `internal/tools/web`  

@@ -1,3 +1,14 @@
+---
+title: "TUI Architecture v2 – What Changed + How to Test"
+description: "Architecture decision record: TUI Architecture v2 – What Changed + How to Test."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # TUI Architecture v2 – What Changed + How to Test
 
 **Date:** 2026-05  

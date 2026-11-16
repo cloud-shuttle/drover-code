@@ -1,3 +1,14 @@
+---
+title: "TUI Component Implementation Roadmap (Post Week 1 Planning)"
+description: "Architecture decision record: TUI Component Implementation Roadmap (Post Week 1 Planning)."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # TUI Component Implementation Roadmap (Post Week 1 Planning)
 
 **Date:** 2026-05-28  

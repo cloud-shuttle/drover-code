@@ -1,3 +1,14 @@
+---
+title: "08 — Config, Permission Engine, and Undercover Mode"
+description: "Architecture decision record: 08 — Config, Permission Engine, and Undercover Mode."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 08 — Config, Permission Engine, and Undercover Mode
 
 **Packages:** `internal/config`, `internal/permissions`, `internal/undercover`  

@@ -1,3 +1,14 @@
+---
+title: "10 — Integrations: IDE Bridge and GitHub @drover-code Webhook"
+description: "Architecture decision record: 10 — Integrations: IDE Bridge and GitHub @drover-code Webhook."
+product: drover-code
+audience: platform-operator
+doc_type: adr
+topics:
+  - agent-jobs
+surface: repo-docs
+---
+
 # 10 — Integrations: IDE Bridge and GitHub @drover-code Webhook
 
 **Packages:** `internal/bridge`, `internal/github`  
