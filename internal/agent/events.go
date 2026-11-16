@@ -103,8 +103,23 @@ const (
 	PermAppliedManually
 )
 
-func (PermissionRequestEvent) isAgentEvent() {}
+func (PermissionRequestEvent) isAgentEvent()      {}
 func (PermissionBatchRequestEvent) isAgentEvent() {}
+
+// AskUserEvent is emitted by ask_user. The TUI shows Question and sends one
+// reply. OK false means the person dismissed it.
+type AskUserEvent struct {
+	Question string
+	ReplyCh  chan<- AskUserReply
+}
+
+// AskUserReply is the person's answer.
+type AskUserReply struct {
+	Text string
+	OK   bool
+}
+
+func (AskUserEvent) isAgentEvent() {}
 
 // UsageEvent carries token consumption for the last API call.
 // Emitted after each streaming response completes.
@@ -141,10 +156,10 @@ func (CompactionStartEvent) isAgentEvent() {}
 
 // CompactionDoneEvent signals a compaction round finished (check Err).
 type CompactionDoneEvent struct {
-	Round                 int
-	EstimatedTokensAfter  int
-	Duration              time.Duration
-	Err                   error // nil on success
+	Round                int
+	EstimatedTokensAfter int
+	Duration             time.Duration
+	Err                  error // nil on success
 }
 
 func (CompactionDoneEvent) isAgentEvent() {}
@@ -155,6 +170,13 @@ type DoneEvent struct{}
 
 func (DoneEvent) isAgentEvent() {}
 
+// TodoEvent is the current session checklist, replaced as a whole.
+type TodoEvent struct {
+	Text string
+}
+
+func (TodoEvent) isAgentEvent() {}
+
 // ErrorEvent carries a fatal error from the loop.
 // After this event the loop has returned; the consumer should show the error.
 type ErrorEvent struct {
@@ -162,4 +184,3 @@ type ErrorEvent struct {
 }
 
 func (ErrorEvent) isAgentEvent() {}
-

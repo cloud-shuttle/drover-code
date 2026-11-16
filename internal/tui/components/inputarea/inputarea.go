@@ -116,6 +116,11 @@ func (ia *InputArea) Queue(input string) {
 	ia.MessageQueue = append(ia.MessageQueue, input)
 }
 
+// QueueFront inserts a message that should run before anything already queued.
+func (ia *InputArea) QueueFront(input string) {
+	ia.MessageQueue = append([]string{input}, ia.MessageQueue...)
+}
+
 // DrainQueue returns and clears the current queue.
 func (ia *InputArea) DrainQueue() []string {
 	q := ia.MessageQueue
@@ -304,7 +309,7 @@ func (ia *InputArea) View() string {
 	}
 
 	if len(ia.MessageQueue) > 0 {
-		queuedText := fmt.Sprintf("⏳ %d message(s) queued...", len(ia.MessageQueue))
+		queuedText := fmt.Sprintf("⏳ %d message(s) queued. Ctrl+G sends the draft as soon as this turn stops.", len(ia.MessageQueue))
 		queuedBanner := lipgloss.NewStyle().Foreground(lipgloss.Color("204")).MarginLeft(2).Render(queuedText)
 		banners = append(banners, queuedBanner)
 	}
@@ -384,19 +389,19 @@ func init() {
 // Enables live application of Settings.Theme.Colors custom overrides.
 func rebuildStyles() {
 	styleInputBorder = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(styles.ColBorder)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.ColBorder)
 
 	styleInputBorderFocused = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(styles.ColAccent)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.ColAccent)
 
 	styleAutoItem = lipgloss.NewStyle().
-			PaddingLeft(2).
-			Foreground(styles.ColMuted)
+		PaddingLeft(2).
+		Foreground(styles.ColMuted)
 
 	styleAutoItemSelected = lipgloss.NewStyle().
-				PaddingLeft(2).
-				Foreground(styles.ColAccent).
-				Bold(true)
+		PaddingLeft(2).
+		Foreground(styles.ColAccent).
+		Bold(true)
 }

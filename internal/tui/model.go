@@ -18,17 +18,17 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/tools/fs"
+	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/historyview"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/inputarea"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/permissionprompt"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/statusbar"
+	"github.com/cloudshuttle/drover-code/internal/tui/components/toolspinner"
+	"github.com/cloudshuttle/drover-code/internal/tui/core"
 	"github.com/cloudshuttle/drover-code/internal/tui/diff"
 	"github.com/cloudshuttle/drover-code/internal/tui/history"
 	"github.com/cloudshuttle/drover-code/internal/tui/historysearch"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/statusbar"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/toolspinner"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/permissionprompt"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/historyview"
-	"github.com/cloudshuttle/drover-code/internal/tui/components/inputarea"
-	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
-	"github.com/cloudshuttle/drover-code/internal/tui/core"
 	"github.com/cloudshuttle/drover-code/internal/tui/styles"
 )
 
@@ -62,6 +62,7 @@ type Model struct {
 	// dcode-007: Permission prompt components (source of truth)
 	PermPrompt *permissionprompt.PermissionPrompt
 	PermBatch  *permissionprompt.PermissionBatchPrompt
+	askUser    *askUserPrompt
 
 	diffModel   *diff.Model
 	showingDiff bool
@@ -69,7 +70,7 @@ type Model struct {
 	searchModel   *historysearch.Model
 	showingSearch bool
 
-	commandPaletteModel *commandpalette.Model
+	commandPaletteModel   *commandpalette.Model
 	showingCommandPalette bool
 
 	// Components (dcode-003 and beyond)
@@ -92,10 +93,13 @@ type Model struct {
 	// paletteActionHandlers map ActionKey -> handler for custom semantic actions.
 	paletteActionHandlers map[string]commandpalette.ActionHandler
 
-
 	glamourRenderer *glamour.TermRenderer
 
 	eventCh <-chan agent.Event
+	// eventWaitArmed is true while one waitForEvent command is blocked on
+	// eventCh. Bubble Tea runs commands concurrently, so a second reader
+	// can commit a later token first ("P"+"ong" becomes "ongP").
+	eventWaitArmed bool
 
 	modelName         string
 	workDir           string
@@ -104,11 +108,15 @@ type Model struct {
 	totalInputTokens  int
 	totalOutputTokens int
 	agentBusy         bool
+	runGen            int
+	turnOpen          bool
+	pendingBash       []string
 
 	lastAPICallInput  int
 	lastAPICallOutput int
 
 	lastError string
+	todoList  string
 
 	compactionBanner string
 
@@ -121,6 +129,15 @@ type Model struct {
 	compactFn       func() error
 	convoMgr        *convo.Manager
 	themeSaveFn     func(mode, palette string) error // for persisting theme changes
+	onClear         func()
+	planOn          bool
+	planToggle      func(on bool)
+
+	showingSessions bool
+	sessionRows     []SessionRow
+	sessionQuery    string
+	sessionCursor   int
+	loadSession     func(id string) error
 }
 
 // SetRunCancel allows injecting the context cancellation function for the current run
@@ -199,8 +216,18 @@ func readMaxHistoryDisplayFromEnv() int {
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		textarea.Blink,
-		waitForEvent(m.eventCh),
+		m.armEventWait(),
 	)
+}
+
+// armEventWait starts the single event reader. A nil return means one is
+// already blocked on eventCh.
+func (m *Model) armEventWait() tea.Cmd {
+	if m.eventWaitArmed || m.eventCh == nil {
+		return nil
+	}
+	m.eventWaitArmed = true
+	return waitForEvent(m.eventCh)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -211,10 +238,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.relayout()
-		cmds = append(cmds, waitForEvent(m.eventCh))
+		cmds = append(cmds, m.armEventWait())
 		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
+		if m.showingSessions {
+			return m.updateSessionPick(msg)
+		}
 		if m.showingSearch && m.searchModel != nil {
 			var newModel tea.Model
 			var cmd tea.Cmd
@@ -277,9 +307,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.handlePermissionBatchKey(msg)
 			return m, cmd
 		}
+		if m.askUser != nil && (msg.Type == tea.KeyEnter || msg.Type == tea.KeyCtrlJ) {
+			return m, m.answerAsk()
+		}
+		if m.askUser != nil && msg.Type == tea.KeyEsc {
+			m.dismissAsk()
+			return m, nil
+		}
 
 		switch msg.Type {
 		case tea.KeyCtrlC:
+			m.clearAsk()
 			if m.agentBusy {
 				if m.runCancel != nil {
 					m.runCancel()
@@ -304,36 +342,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showingCommandPalette = true
 			return m, nil
 		case tea.KeyEnter, tea.KeyCtrlJ:
-			input := strings.TrimSpace(m.InputArea.Value())
-			if input != "" {
-				m.inputHistory.Add(input)
-				m.historyIndex = len(m.inputHistory.Get())
-				m.savedInput = ""
-
-				m.InputArea.Reset()
-				m.InputArea.ClearAutocomplete()
-				m.lastError = ""
-
-				in := strings.ToLower(input)
-				if in == "/quit" || in == "/exit" {
-					return m, tea.Quit
-				}
-				if in == "/history" {
-					if !m.agentBusy {
-						m.searchModel = historysearch.New(m.inputHistory.Get(), m.width, m.height)
-						m.showingSearch = true
-					}
-					return m, nil
-				}
-
-				if m.agentBusy {
-					m.InputArea.Queue(input)
-					m.scrollToBottom()
-					return m, nil
-				}
-				return m, m.submitInput(input)
-			}
-			return m, nil
+			return m, m.takeInput(false)
+		case tea.KeyCtrlG:
+			return m, m.takeInput(true)
 		case tea.KeyEsc:
 			m.InputArea.ClearAutocomplete()
 			if m.showingCommandPalette {
@@ -378,6 +389,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.InputArea.AcceptAutocomplete() {
 				return m, nil
 			}
+		case tea.KeyShiftTab:
+			m.togglePlanMode()
+			return m, nil
 		case tea.KeyPgUp, tea.KeyPgDown:
 			var vpCmd tea.Cmd
 			if m.HistoryView != nil {
@@ -444,15 +458,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commandPaletteModel = nil
 		return m, nil
 
+	case BackgroundBashMsg:
+		if m.StatusBar != nil {
+			m.StatusBar.BackgroundJobs = msg.Running
+		}
+		if !msg.Done || msg.Output == "" {
+			return m, nil
+		}
+		if m.agentPaused() {
+			m.noteBackground(msg.Output)
+			return m, nil
+		}
+		if m.agentBusy || m.turnOpen {
+			m.pendingBash = append(m.pendingBash, msg.Output)
+			return m, nil
+		}
+		return m, m.submitInput(msg.Output)
+
 	case agentMsg:
+		m.eventWaitArmed = false
 		cmd := m.handleAgentEvent(msg.event)
-		cmds = append(cmds, waitForEvent(m.eventCh))
+		cmds = append(cmds, m.armEventWait())
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
 
 	case agentRunCompleteMsg:
+		if msg.gen != 0 && msg.gen != m.runGen {
+			return m, nil
+		}
+		m.turnOpen = false
 		m.agentBusy = false
 		if msg.err != nil {
 			if errors.Is(msg.err, context.Canceled) {
@@ -471,6 +507,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.StatusBar.Paused = true
 					m.StatusBar.PausedReason = pausedReasonForBar
 				}
+				for _, text := range m.pendingBash {
+					m.noteBackground(text)
+				}
+				m.pendingBash = nil
+				return m, tea.Batch(cmds...)
 			} else {
 				m.lastError = msg.err.Error()
 
@@ -480,9 +521,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		
+
 		for {
-			next, ok := m.InputArea.Dequeue()
+			next, ok := m.popFollowUp(msg.err == nil)
 			if !ok || m.agentBusy {
 				break
 			}
@@ -490,7 +531,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		
+
 		return m, tea.Batch(cmds...)
 
 	case compactCompleteMsg:
@@ -507,7 +548,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.scrollToBottom()
 
-		cmds = append(cmds, waitForEvent(m.eventCh))
+		cmds = append(cmds, m.armEventWait())
 		for {
 			next, ok := m.InputArea.Dequeue()
 			if !ok || m.agentBusy {
@@ -517,7 +558,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		
+
 		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
@@ -566,6 +607,9 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 		m.scrollToBottom()
 		return ts.Spinner.Tick
 
+	case agent.TodoEvent:
+		m.todoList = e.Text
+
 	case agent.ToolDoneEvent:
 		// LiveRegion is the sole owner of active tools + completed tools
 		if _, ok := m.Live.ActiveTools[e.CallIndex]; ok {
@@ -585,6 +629,13 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 			}
 		}
 
+	case agent.AskUserEvent:
+		if m.askUser != nil {
+			m.dismissAsk()
+		}
+		m.askUser = &askUserPrompt{Question: e.Question, ReplyCh: e.ReplyCh}
+		m.lastError = ""
+
 	case agent.PermissionRequestEvent:
 		// Deeper Guard heuristics (beyond simple tool names)
 		level, reason := m.assessPermissionRisk(e.ToolName, e.Input, e.Summary)
@@ -598,7 +649,7 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 				dm := diff.NewDiffModel(filePath, diffStr)
 				m.diffModel = &dm
 				m.showingDiff = true
-				
+
 				// dcode-007: PermissionPrompt component (legacy dual-state fully removed)
 				m.PermPrompt = &permissionprompt.PermissionPrompt{
 					ToolName:   e.ToolName,
@@ -702,13 +753,10 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 		m.Live.ToolOrder = nil
 		m.Live.CompletedTools = nil
 
-		if next, ok := m.InputArea.Dequeue(); ok {
-			return m.submitInput(next)
-		}
-
 		m.scrollToBottom()
 
 	case agent.ErrorEvent:
+		m.clearAsk()
 		if errors.Is(e.Err, context.Canceled) {
 			// Cancellation comes from /pause (runCancel). Event and run-complete
 			// messages can arrive in either order, so report the pause here too
@@ -776,6 +824,48 @@ func (m *Model) handlePermissionBatchKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// takeInput submits the draft. sendNow cancels a live turn and puts the draft
+// at the front of the queue so it runs as soon as the turn stops.
+func (m *Model) takeInput(sendNow bool) tea.Cmd {
+	input := strings.TrimSpace(m.InputArea.Value())
+	if input == "" {
+		return nil
+	}
+	m.inputHistory.Add(input)
+	m.historyIndex = len(m.inputHistory.Get())
+	m.savedInput = ""
+	m.InputArea.Reset()
+	m.InputArea.ClearAutocomplete()
+	m.lastError = ""
+
+	in := strings.ToLower(input)
+	if in == "/quit" || in == "/exit" {
+		return tea.Quit
+	}
+	if in == "/history" {
+		if !m.agentBusy {
+			m.searchModel = historysearch.New(m.inputHistory.Get(), m.width, m.height)
+			m.showingSearch = true
+		}
+		return nil
+	}
+	if m.agentBusy {
+		if sendNow {
+			m.InputArea.QueueFront(input)
+			if m.runCancel != nil {
+				m.runCancel()
+				m.runCancel = nil
+			}
+			m.lastError = "Sending when the current turn stops."
+		} else {
+			m.InputArea.Queue(input)
+		}
+		m.scrollToBottom()
+		return nil
+	}
+	return m.submitInput(input)
+}
+
 func (m *Model) submitInput(input string) tea.Cmd {
 	if cmd, handled := m.handleBuiltinSlash(input); handled {
 		return cmd
@@ -810,13 +900,56 @@ func (m *Model) submitInput(input string) tea.Cmd {
 	m.scrollToBottom()
 
 	if m.runFunc != nil {
-		return m.runFunc(input)
+		cmd := m.runFunc(input)
+		if cmd == nil {
+			return nil
+		}
+		m.runGen++
+		gen := m.runGen
+		m.turnOpen = true
+		return func() tea.Msg {
+			msg := cmd()
+			if done, ok := msg.(agentRunCompleteMsg); ok {
+				done.gen = gen
+				return done
+			}
+			return msg
+		}
 	}
 	return nil
 }
 
+func (m *Model) agentPaused() bool {
+	return m.StatusBar != nil && m.StatusBar.Paused
+}
+
+func (m *Model) noteBackground(text string) {
+	if text == "" || m.HistoryView == nil {
+		return
+	}
+	m.HistoryView.AppendTurn(core.RenderedTurn{Role: "system", Content: text})
+}
+
+func (m *Model) popFollowUp(allowUser bool) (string, bool) {
+	if allowUser {
+		if next, ok := m.InputArea.Dequeue(); ok {
+			return next, true
+		}
+	}
+	if len(m.pendingBash) == 0 {
+		return "", false
+	}
+	next := m.pendingBash[0]
+	m.pendingBash = m.pendingBash[1:]
+	return next, true
+}
+
 func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 	in := strings.TrimSpace(input)
+	if in == "/planmode" {
+		m.togglePlanMode()
+		return nil, true
+	}
 	if strings.HasPrefix(in, "/plan") {
 		rest := strings.TrimSpace(strings.TrimPrefix(in, "/plan"))
 		if rest == "" {
@@ -830,9 +963,14 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 			detail = strings.TrimSpace(parts[1])
 		}
 		var prompt string
-		if detail == "" {
+		switch {
+		case m.planOn && detail == "":
+			prompt = fmt.Sprintf("Write a clear implementation plan for %q. Plan mode is on, so do not call write_file, edit_file, or bash. Put the plan in your reply. write_plan may update PLAN.md.", path)
+		case m.planOn:
+			prompt = fmt.Sprintf("Write a clear implementation plan for %q that addresses: %s. Plan mode is on, so do not call write_file, edit_file, or bash. Put the plan in your reply. write_plan may update PLAN.md.", path, detail)
+		case detail == "":
 			prompt = fmt.Sprintf("Create a clear implementation or design plan as Markdown in the file %q using write_file (create parent directories if needed). Include phases, concrete deliverables, and success criteria. When done, briefly confirm the path.", path)
-		} else {
+		default:
 			prompt = fmt.Sprintf("Create or update the Markdown file %q using write_file (create parent directories if needed) with a plan that addresses: %s\n\nBe specific and actionable. When done, briefly confirm the path.", path, detail)
 		}
 		m.HistoryView.AppendTurn(core.RenderedTurn{Role: "user", Content: in})
@@ -868,15 +1006,7 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 	case "/quit", "/exit":
 		return tea.Quit, true
 	case "/clear", "/reset":
-		m.HistoryView.Clear()
-		m.streamBuf.Reset()
-		if m.Live != nil {
-			m.Live.ResetLiveStreaming()
-		}
-		m.lastError = ""
-		if m.convoMgr != nil {
-			m.convoMgr.Reset()
-		}
+		m.clearConversation()
 		return nil, true
 	case "/tokens":
 		m.appendLocalInfo(m.tokensInfoText())
@@ -897,7 +1027,7 @@ func (m *Model) handleBuiltinSlash(input string) (tea.Cmd, bool) {
 			m.StatusBar.AgentBusy = true
 		}
 
-		return tea.Batch(runCompact(m.compactFn), waitForEvent(m.eventCh)), true
+		return tea.Batch(runCompact(m.compactFn), m.armEventWait()), true
 	case "/resume":
 		if !m.agentBusy {
 			// Resume by continuing the agentic loop with the current conversation state.
@@ -1032,14 +1162,13 @@ func (m *Model) modelInfoText() string {
 	))
 }
 
-
-
 func defaultSlashCommands() []slashItem {
 	return []slashItem{
 		{"clear", "clear conversation history"},
 		{"reset", "reset conversation"},
 		{"quit", "exit drover-code"},
 		{"plan", "write a plan file: /plan path topic"},
+		{"planmode", "toggle plan mode (also Shift+Tab)"},
 		{"compact", "summarise and compress context"},
 		{"model", "switch model"},
 		{"tokens", "show token usage"},
@@ -1152,6 +1281,26 @@ func (m *Model) SetCompactFn(fn func() error) { m.compactFn = fn }
 func (m *Model) SetThemeSaveFn(fn func(mode, palette string) error) { m.themeSaveFn = fn }
 
 func (m *Model) SetConversation(mgr *convo.Manager) { m.convoMgr = mgr }
+
+// SetOnClear runs after /clear resets the conversation. Use it to start a new saved session.
+func (m *Model) SetOnClear(fn func()) { m.onClear = fn }
+
+func (m *Model) clearConversation() {
+	if m.HistoryView != nil {
+		m.HistoryView.Clear()
+	}
+	m.streamBuf.Reset()
+	if m.Live != nil {
+		m.Live.ResetLiveStreaming()
+	}
+	m.lastError = ""
+	if m.convoMgr != nil {
+		m.convoMgr.Reset()
+	}
+	if m.onClear != nil {
+		m.onClear()
+	}
+}
 
 // SetGuardRisk allows external code (e.g. drover-guard, program.go, or event handlers)
 // to push real risk signals into the TUI so the StatusBar can reflect them.
@@ -1342,21 +1491,13 @@ func (m *Model) executePaletteAction(key string) tea.Cmd {
 				m.StatusBar.AgentBusy = true
 			}
 			m.Live.Streaming = false
-			return tea.Batch(runCompact(m.compactFn), waitForEvent(m.eventCh))
+			return tea.Batch(runCompact(m.compactFn), m.armEventWait())
 		}
 		m.lastError = "compaction is not available"
 		return nil
 
 	case "clear", "reset":
-		m.HistoryView.Clear()
-		m.streamBuf.Reset()
-		if m.Live != nil {
-			m.Live.ResetLiveStreaming()
-		}
-		m.lastError = ""
-		if m.convoMgr != nil {
-			m.convoMgr.Reset()
-		}
+		m.clearConversation()
 		return nil
 
 	case "tokens":
@@ -1410,4 +1551,3 @@ func (m *Model) executePaletteAction(key string) tea.Cmd {
 		return nil
 	}
 }
-

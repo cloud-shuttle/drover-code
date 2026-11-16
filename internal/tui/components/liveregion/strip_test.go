@@ -31,6 +31,30 @@ func TestStripCursorPositionReports(t *testing.T) {
 	}
 }
 
+func TestStripInputCursorReports(t *testing.T) {
+	tests := []struct {
+		name          string
+		in            string
+		stored, shown string
+	}{
+		{"literal reply", `\[1;1R`, "", ""},
+		{"csi reply", "\x1b[1;1R", "", ""},
+		{"bare reply", "[1;1R", "", ""},
+		{"keeps typed text", `fix\[1;1R`, "fix", "fix"},
+		{"hides a reply still arriving", `\[1;1`, `\[1;1`, ""},
+		{"bare digits stay", "[1", "[1", "[1"},
+		{"typed backslash stays once a letter follows", `foo\x`, `foo\x`, `foo\x`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stored, shown := StripInputCursorReports(tt.in)
+			if stored != tt.stored || shown != tt.shown {
+				t.Errorf("StripInputCursorReports(%q) = stored %q shown %q, want stored %q shown %q", tt.in, stored, shown, tt.stored, tt.shown)
+			}
+		})
+	}
+}
+
 func TestStripTerminalOSCResponses(t *testing.T) {
 	tests := []struct {
 		name string

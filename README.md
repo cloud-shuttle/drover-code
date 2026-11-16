@@ -13,6 +13,7 @@ Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML fro
 
 **How-To Guides (Problem-oriented):**
 - [Configure Custom LLM Providers](docs/how-to/configure-custom-providers.md)
+- [Resume a session](docs/how-to/resume-a-session.md)
 - [Interactive Diffs](docs/how-to/interactive-diffs.md)
 - [Integration Checklist](docs/how-to/integration-checklist.md)
 
@@ -69,6 +70,16 @@ CGO_ENABLED=0 go build -o drover-code ./cmd/drover-code
 export ANTHROPIC_API_KEY=sk-ant-...
 ./drover-code
 ```
+
+Quit and start again in the same directory to continue the last conversation:
+
+```bash
+./drover-code -c
+./drover-code --resume            # pick a session in the TUI
+./drover-code --resume session-18f3
+```
+
+Transcripts are written to `~/.drover/sessions/` after each completed message. `/clear` starts a new session id and leaves the previous file in place. See [Resume a session](docs/how-to/resume-a-session.md).
 
 **Headless** (stdin, non-interactive stdout):
 

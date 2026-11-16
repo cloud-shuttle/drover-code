@@ -30,46 +30,53 @@ type CommandConfig struct {
 }
 
 // MCPServerConfig defines an external MCP server to connect to.
+// Set Command for a stdio server, or URL for a streamable HTTP server.
 type MCPServerConfig struct {
-	Command []string          `json:"command"`
+	Command []string          `json:"command,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // Settings is the merged configuration from all three levels.
 type Settings struct {
-	Model                      string                   `json:"model,omitempty"`
-	PermissionMode             string                   `json:"permissionMode,omitempty"`
-	AllowedTools               []string                 `json:"allowedTools,omitempty"`
-	DeniedTools                []string                 `json:"deniedTools,omitempty"`
-	MaxTokens                  int                      `json:"maxTokens,omitempty"`
-	CoordinatorMode            bool                     `json:"coordinatorMode,omitempty"`
-	CoordinatorRemote          bool                     `json:"coordinatorRemote,omitempty"`
-	AcceptCmd                  string                   `json:"acceptCmd,omitempty"`
-	Verbose                    bool                     `json:"verbose,omitempty"`
-	DreamEnabled               bool                     `json:"dreamEnabled,omitempty"`
-	UndercoverMode             *bool                    `json:"undercoverMode,omitempty"`
-	Env                        map[string]string        `json:"env,omitempty"`
-	Commands                   map[string]CommandConfig `json:"commands,omitempty"`
+	Model                      string                     `json:"model,omitempty"`
+	PermissionMode             string                     `json:"permissionMode,omitempty"`
+	AllowedTools               []string                   `json:"allowedTools,omitempty"`
+	DeniedTools                []string                   `json:"deniedTools,omitempty"`
+	MaxTokens                  int                        `json:"maxTokens,omitempty"`
+	CoordinatorMode            bool                       `json:"coordinatorMode,omitempty"`
+	CoordinatorRemote          bool                       `json:"coordinatorRemote,omitempty"`
+	AcceptCmd                  string                     `json:"acceptCmd,omitempty"`
+	Verbose                    bool                       `json:"verbose,omitempty"`
+	DreamEnabled               bool                       `json:"dreamEnabled,omitempty"`
+	UndercoverMode             *bool                      `json:"undercoverMode,omitempty"`
+	Env                        map[string]string          `json:"env,omitempty"`
+	Commands                   map[string]CommandConfig   `json:"commands,omitempty"`
 	MCPServers                 map[string]MCPServerConfig `json:"mcpServers,omitempty"`
-	ContextLimitEstimate       int                      `json:"contextLimitEstimate,omitempty"`
-	CharsPerTokenEstimate      int                      `json:"charsPerTokenEstimate,omitempty"`
-	ProjectMarkdownMaxBytes    int                      `json:"projectMarkdownMaxBytes,omitempty"`
-	ProjectMarkdownMaxFiles    int                      `json:"projectMarkdownMaxFiles,omitempty"`
-	ProjectMarkdownIgnoreGlobs []string                 `json:"projectMarkdownIgnoreGlobs,omitempty"`
-	DisableAutoCompaction      bool                     `json:"disableAutoCompaction,omitempty"`
+	ContextLimitEstimate       int                        `json:"contextLimitEstimate,omitempty"`
+	CharsPerTokenEstimate      int                        `json:"charsPerTokenEstimate,omitempty"`
+	ProjectMarkdownMaxBytes    int                        `json:"projectMarkdownMaxBytes,omitempty"`
+	ProjectMarkdownMaxFiles    int                        `json:"projectMarkdownMaxFiles,omitempty"`
+	ProjectMarkdownIgnoreGlobs []string                   `json:"projectMarkdownIgnoreGlobs,omitempty"`
+	DisableAutoCompaction      bool                       `json:"disableAutoCompaction,omitempty"`
 	// MaxAgentTiers tightens the operator delegation ceiling (max 3). Values above the
 	// operator ceiling are ignored; zero means use the operator default.
-	MaxAgentTiers             int                      `json:"maxAgentTiers,omitempty"`
-	DreamMaxRetentionEntries   int                      `json:"dreamMaxRetentionEntries,omitempty"`
-	DreamMaxRetentionAgeDays   int                      `json:"dreamMaxRetentionAgeDays,omitempty"`
+	MaxAgentTiers            int `json:"maxAgentTiers,omitempty"`
+	DreamMaxRetentionEntries int `json:"dreamMaxRetentionEntries,omitempty"`
+	DreamMaxRetentionAgeDays int `json:"dreamMaxRetentionAgeDays,omitempty"`
 
-	// Theme configuration (foundation for TUI Theme System roadmap item)
-	Theme struct {
-		Mode    string            `json:"mode,omitempty"`    // "auto", "light", "dark"
-		Palette string            `json:"palette,omitempty"` // named palette e.g. "default", "high-contrast"
-		Colors  map[string]string `json:"colors,omitempty"`  // custom color overrides (future)
-	} `json:"theme,omitempty"`
+	// Theme accepts Claude's string form ("dark") and the object form.
+	Theme ThemeConfig `json:"theme,omitempty"`
 }
+
+// ThemeConfig is the TUI theme. Mode is auto, light, or dark.
+type ThemeConfig struct {
+	Mode    string            `json:"mode,omitempty"`
+	Palette string            `json:"palette,omitempty"`
+	Colors  map[string]string `json:"colors,omitempty"`
+}
+
 // Loader manages settings loading and CLAUDE.md injection.
 type Loader struct {
 	mu         sync.RWMutex

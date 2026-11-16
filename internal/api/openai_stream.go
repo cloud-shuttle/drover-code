@@ -255,6 +255,129 @@ func (t *oaTranslator) emit(event string, payload map[string]any) error {
 	return err
 }
 
+func newResponsesTranslatedStream(body io.ReadCloser) *Stream {
+	pr, pw := io.Pipe()
+	go func() {
+		err := translateResponsesSSE(body, pw)
+		_ = body.Close()
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		_ = pw.Close()
+	}()
+	return newStream(pr)
+}
+
+type responsesEvent struct {
+	Type        string `json:"type"`
+	Delta       string `json:"delta"`
+	OutputIndex int    `json:"output_index"`
+	Item        *struct {
+		Type   string `json:"type"`
+		Name   string `json:"name"`
+		CallID string `json:"call_id"`
+	} `json:"item"`
+	Response *struct {
+		Status string `json:"status"`
+		Usage  *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	} `json:"response"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func translateResponsesSSE(r io.Reader, w io.Writer) error {
+	t := newOATranslator(w)
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := sc.Text()
+		data, ok := strings.CutPrefix(line, "data:")
+		if !ok {
+			continue
+		}
+		data = strings.TrimSpace(data)
+		if data == "" {
+			continue
+		}
+		if data == "[DONE]" {
+			return t.finish()
+		}
+		var ev responsesEvent
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			return fmt.Errorf("parse responses event: %w", err)
+		}
+		if err := t.responsesEvent(ev); err != nil {
+			return err
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	return t.finish()
+}
+
+func (t *oaTranslator) responsesEvent(ev responsesEvent) error {
+	switch ev.Type {
+	case "response.output_text.delta":
+		if ev.Delta == "" {
+			return nil
+		}
+		if err := t.ensureText(); err != nil {
+			return err
+		}
+		return t.emitDelta(t.textIndex, map[string]any{"type": "text_delta", "text": ev.Delta})
+	case "response.output_item.added":
+		if ev.Item == nil || ev.Item.Type != "function_call" {
+			return nil
+		}
+		return t.ensureTool(ev.OutputIndex, ev.Item.CallID, ev.Item.Name)
+	case "response.function_call_arguments.delta":
+		if ev.Delta == "" {
+			return nil
+		}
+		acc := t.tools[ev.OutputIndex]
+		if acc == nil || !acc.started {
+			if err := t.ensureTool(ev.OutputIndex, "", ""); err != nil {
+				return err
+			}
+			acc = t.tools[ev.OutputIndex]
+		}
+		return t.emitDelta(acc.blockIndex, map[string]any{
+			"type":         "input_json_delta",
+			"partial_json": ev.Delta,
+		})
+	case "response.completed":
+		if ev.Response != nil && ev.Response.Usage != nil {
+			t.usage.InputTokens = ev.Response.Usage.InputTokens
+			t.usage.OutputTokens = ev.Response.Usage.OutputTokens
+		}
+		if len(t.tools) > 0 {
+			t.stopReason = "tool_use"
+		} else {
+			t.stopReason = "end_turn"
+		}
+		return nil
+	case "response.failed", "error":
+		msg := "responses request failed"
+		if ev.Error != nil && ev.Error.Message != "" {
+			msg = ev.Error.Message
+		} else if ev.Response != nil && ev.Response.Error != nil && ev.Response.Error.Message != "" {
+			msg = ev.Response.Error.Message
+		}
+		return fmt.Errorf("api error %s: %s", ev.Type, msg)
+	default:
+		return nil
+	}
+}
+
 func mapOpenAIStopReason(reason string) string {
 	switch reason {
 	case "tool_calls", "function_call":
