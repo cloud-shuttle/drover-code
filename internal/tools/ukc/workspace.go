@@ -51,17 +51,13 @@ func uploadWorkspaceStream(ctx context.Context, client *http.Client, baseURL, ag
 
 // UploadWorkspaceAt uploads localDir to the worker runtime at baseURL.
 func UploadWorkspaceAt(ctx context.Context, client *http.Client, baseURL, agentToken, localDir string, limits workspace.Limits) error {
-	// Instead of replicating PlanUpload, we can assume the limits are checked there,
-	// or we can just filter by ShouldExclude here if we want to stream blindly.
-	// Since PlanUpload does the gitignore checking, we should probably do it here too,
-	// but for now, we just apply the ShouldExclude and size checks.
-	// Actually, the previous implementation used `newWorkspaceFilter`.
-	// For now, we will do a simple ShouldExclude filter.
-	// But wait, the original `UploadWorkspaceAt` called `newWorkspaceFilter`. 
-	// We can't access `filter` anymore because it's private in `workspace`.
-	// A better solution is to modify `UploadWorkspaceAt` to rely purely on `workspace.PlanUpload`
-	// but doing a second pass, or just skipping ShouldExclude-d things and relying on the summary.
-	// Actually, since `drover-cloud` will build the tarball itself, let's keep it simple here.
+	if limits.MaxFileBytes <= 0 || limits.MaxTotalBytes <= 0 {
+		limits = workspace.DefaultLimits()
+	}
+	filter, err := workspace.NewFilter(localDir)
+	if err != nil {
+		return err
+	}
 
 	pr, pw := io.Pipe()
 	go func() {
@@ -89,7 +85,7 @@ func UploadWorkspaceAt(ctx context.Context, client *http.Client, baseURL, agentT
 			}
 			relPath = filepath.ToSlash(relPath)
 
-			if workspace.ShouldExclude(relPath) {
+			if filter.SkipWalk(relPath, info) {
 				if info.IsDir() {
 					return filepath.SkipDir
 				}

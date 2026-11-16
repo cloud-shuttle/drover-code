@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -19,15 +21,26 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/bridge"
+	"github.com/cloudshuttle/drover-code/internal/commands"
 	"github.com/cloudshuttle/drover-code/internal/config"
 	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/commands"
 	"github.com/cloudshuttle/drover-code/internal/coordinator"
 	"github.com/cloudshuttle/drover-code/internal/dream"
 	github "github.com/cloudshuttle/drover-code/internal/github"
+	"github.com/cloudshuttle/drover-code/internal/mcp"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
+	"github.com/cloudshuttle/drover-code/internal/session"
+	"github.com/cloudshuttle/drover-code/internal/skills"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
+	askpkg "github.com/cloudshuttle/drover-code/internal/tools/ask"
+	browserpkg "github.com/cloudshuttle/drover-code/internal/tools/browser"
+	delegatepkg "github.com/cloudshuttle/drover-code/internal/tools/delegate"
+	explorepkg "github.com/cloudshuttle/drover-code/internal/tools/explore"
+	fspkg "github.com/cloudshuttle/drover-code/internal/tools/fs"
+	shellpkg "github.com/cloudshuttle/drover-code/internal/tools/shell"
+	todopkg "github.com/cloudshuttle/drover-code/internal/tools/todo"
+	webpkg "github.com/cloudshuttle/drover-code/internal/tools/web"
 	"github.com/cloudshuttle/drover-code/internal/tui"
 	"github.com/cloudshuttle/drover-code/internal/undercover"
 	"github.com/cloudshuttle/drover-code/internal/warden"
@@ -99,11 +112,22 @@ func main() {
 		os.Exit(2)
 	}
 
-	apiKey := requireAnthropicAPIKey()
 	workDir := mustGetwd()
 
 	cfg := loadConfig(workDir)
 	settings := cfg.Get()
+
+	// Provide a persistence function for theme changes (writes back to project settings).
+	// This enables "last-used theme per project" (saved into .claude/settings.json).
+	themeSaveFn := func(mode, palette string) error {
+		delta := config.Settings{}
+		delta.Theme.Mode = mode
+		if palette != "" {
+			delta.Theme.Palette = palette
+		}
+		return cfg.Save(delta)
+	}
+
 	if startupFlags.CoordinatorRemote {
 		settings.CoordinatorRemote = true
 	}
@@ -113,26 +137,122 @@ func main() {
 	if startupFlags.Verbose {
 		settings.Verbose = true
 	}
+	if sessionResumeRequested() && !localSessionEnabled(settings) {
+		fmt.Fprintln(os.Stderr, "drover-code: -c and --resume are for the local TUI and headless run")
+		os.Exit(2)
+	}
+	var sessionPicker []tui.SessionRow
+	if startupFlags.ResumeList && startupFlags.ResumeID == "" {
+		if wantsHeadlessMode() {
+			printSessionList(workDir)
+			return
+		}
+		rows, err := listSavedSessions(workDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "drover-code: %v\n", err)
+			os.Exit(2)
+		}
+		if len(rows) == 0 {
+			fmt.Println("No saved sessions in this directory yet. A session is stored after the first completed reply. Quit, then run drover-code -c or drover-code --resume.")
+			return
+		}
+		sessionPicker = rows
+	}
 
 	modelStr := coalesce(os.Getenv("ANTHROPIC_MODEL"), settings.Model, defaultModel)
+	if api.ProviderFromEnv() == api.ProtocolOpenAI {
+		if ov := api.ModelFromEnv(api.ProtocolOpenAI); ov != "" {
+			modelStr = ov
+		}
+	}
 
 	undercoverActive := resolveUndercoverMode(settings, workDir)
 	sysPrompt := buildSystemPrompt(workDir, cfg.SystemInjection(), undercoverActive)
 
-	client := api.NewClient(apiKey, modelStr)
-	api.ApplyGatewayEnv(client)
+	client := requireLLMClient(modelStr)
 	mgr := convo.NewManagerWithSystem(sysPrompt)
 	config.ApplyConvoHeuristics(mgr, settings)
+	config.ApplyTheme(settings) // Theme System foundation
 	registry := tools.NewRegistry()
 	tools.RegisterAll(registry, workDir)
+	registerLocalHarness(registry, workDir)
+	if localSessionEnabled(settings) {
+		if b, ok := registry.Get("bash").(*shellpkg.Bash); ok {
+			b.AllowBackground = true
+			if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+				b.Sandbox = true
+			}
+		}
+		// ponytail: explore and delegate use the process client, not a later Loop.SetDriver override; follow that override when a command must run on its own model.
+		registry.Register(&explorepkg.Agent{
+			Ask: func(ctx context.Context, task string) (string, error) {
+				return agent.Explore(ctx, agent.NewAnthropicInferenceDriver(client), workDir, task)
+			},
+		})
+		registry.Register(&delegatepkg.Agent{
+			Ask: func(ctx context.Context, task string) (string, error) {
+				return agent.Delegate(ctx, agent.NewAnthropicInferenceDriver(client), workDir, task, agent.DelegateOpts{
+					Sandbox: runtime.GOOS == "darwin" || runtime.GOOS == "linux",
+					Gopls:   true,
+				})
+			},
+		})
+		br := &browserpkg.Browser{}
+		registry.Register(br)
+		defer br.Close()
+		if w, ok := registry.Get("write_file").(*fspkg.WriteFile); ok {
+			w.Gopls = true
+		}
+		if e, ok := registry.Get("edit_file").(*fspkg.EditFile); ok {
+			e.Gopls = true
+		}
+		prompt := mgr.SystemPrompt() + "\n\nexplore searches this tree in a separate read-only pass and returns only a short file map. Use it for a broad question about where code lives. Do not use it to edit files or run commands.\n\ndelegate runs one coding task in a separate loop and returns a short result. Use it for a chunk of work that would flood this conversation. The child can read, edit, and run bash. It cannot ask the user or start another delegate.\n\nbrowser opens a local headless Chrome. Use open, then snapshot, click, type, or screenshot. It can reach the network. bash cannot. Pages are http and https.\n\nAfter write_file or edit_file changes a .go file, the tool result includes gopls errors and warnings for that file.\n"
+		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+			prompt += "\nbash is sandboxed in this session. It can read files and write only inside the working tree and a private temp directory. Network is blocked, so downloads and package fetches fail.\n"
+		}
+		mgr.SetSystemPrompt(prompt)
+	}
 
 	dreamStore, dreamWorker := setupDream(settings, workDir, client)
 
 	lf := telemetry.New(telemetry.ConfigFromEnv())
 	defer lf.Flush()
 
-	ctx, cancel := signal.NotifyContext(telemetry.WithTracer(context.Background(), lf), syscall.SIGINT, syscall.SIGTERM)
+	sessionID := session.NewID()
+	var rec *session.Recorder
+	if localSessionEnabled(settings) {
+		store := session.Open(session.DefaultRoot())
+		if len(sessionPicker) == 0 && (startupFlags.ResumeID != "" || startupFlags.Continue) {
+			tr, err := loadSavedSession(store, workDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "drover-code: %v\n", err)
+				os.Exit(2)
+			}
+			for _, msg := range tr.Messages {
+				mgr.Append(msg)
+			}
+			sessionID = tr.ID
+		}
+		rec = session.NewRecorder(store, sessionID, workDir, mgr.Messages)
+	}
+	baseCtx := telemetry.WithSessionID(context.Background(), sessionID)
+
+	// Phase 4: Linear Telemetry Context
+	if issueID := telemetry.ExtractIssueID(workDir, startupFlags.LinearIssue); issueID != "" {
+		baseCtx = telemetry.WithLinearIssue(baseCtx, issueID)
+	}
+	if linClient := telemetry.NewLinearClient(); linClient != nil {
+		baseCtx = telemetry.WithLinearClient(baseCtx, linClient)
+	}
+
+	ctx, cancel := signal.NotifyContext(telemetry.WithTracer(baseCtx, lf), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	var mcpNotes []string
+	for _, w := range mcp.RegisterAll(ctx, registry, settings) {
+		fmt.Fprintf(os.Stderr, "mcp: %s\n", w)
+		mcpNotes = append(mcpNotes, w)
+	}
 
 	// Custom commands setup
 	cmdLoader := commands.NewLoader(workDir)
@@ -148,7 +268,7 @@ func main() {
 	// a shell profile or project settings can accidentally force the wrong mode.
 	switch {
 	case wantsHeadlessMode():
-		runHeadless(ctx, client, mgr, registry, settings, workDir, dreamWorker, cmdExecutor)
+		runHeadless(ctx, client, mgr, registry, settings, workDir, dreamWorker, cmdExecutor, rec)
 
 	case envTruthy("DROVER_CODE_IDE_BRIDGE"):
 		runBridgeMode(ctx, client, mgr, registry, settings, workDir, dreamWorker)
@@ -160,14 +280,13 @@ func main() {
 		runCoordinatorMode(ctx, client, registry, modelStr, workDir, settings, dreamWorker)
 
 	default:
-		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore, cmdExecutor)
+		runTUI(ctx, client, mgr, registry, modelStr, settings, workDir, dreamWorker, dreamStore, cmdExecutor, themeSaveFn, mcpNotes, rec, sessionPicker)
 	}
 }
 
 // ── Webhook server ─────────────────────────────────────────────────────────
 
 func runWebhookServer() {
-	apiKey := requireAnthropicAPIKey()
 	ghToken := requireEnv("GITHUB_TOKEN")
 	webhookSecret := os.Getenv("GITHUB_WEBHOOK_SECRET")
 	addr := coalesce(os.Getenv("WEBHOOK_ADDR"), ":8080")
@@ -177,8 +296,13 @@ func runWebhookServer() {
 		log.Fatalf("create work dir: %v", err)
 	}
 
-	client := api.NewClient(apiKey, defaultModel)
-	api.ApplyGatewayEnv(client)
+	modelStr := coalesce(os.Getenv("ANTHROPIC_MODEL"), defaultModel)
+	if api.ProviderFromEnv() == api.ProtocolOpenAI {
+		if ov := api.ModelFromEnv(api.ProtocolOpenAI); ov != "" {
+			modelStr = ov
+		}
+	}
+	client := requireLLMClient(modelStr)
 	ghClient := github.NewClient(ghToken)
 	runner := github.NewRunner(ghClient, client, workBase)
 	srv := github.NewServer(runner, webhookSecret)
@@ -215,6 +339,10 @@ func runTUI(
 	dw *dream.Worker,
 	ds dream.Store,
 	cmdExec *commands.Executor,
+	themeSaveFn func(mode, palette string) error,
+	notes []string,
+	rec *session.Recorder,
+	picker []tui.SessionRow,
 ) {
 	if ds != nil {
 		if inj := dream.BuildInjection(ds, 5); inj != "" {
@@ -225,7 +353,43 @@ func runTUI(
 		dw.Start(ctx)
 	}
 
-	prog := tui.NewProgram(ctx, client, mgr, registry, modelStr, settings, workDir, cmdExec)
+	mgr.SetSystemPrompt(mgr.SystemPrompt() + "\n\nask_user asks the person one question and waits for their typed answer. Use it when you need a decision you cannot infer. One question at a time.\n")
+	prog := tui.NewProgram(ctx, client, mgr, registry, modelStr, settings, workDir, cmdExec, themeSaveFn)
+	registry.Register(&askpkg.User{Ask: prog.AskUser})
+	if b, ok := registry.Get("bash").(*shellpkg.Bash); ok && b.AllowBackground {
+		b.SetOnDone(func(n shellpkg.Notice) {
+			prog.Send(tui.BackgroundBashMsg{Running: n.Running, Output: n.Output, Done: n.Done})
+		})
+		defer b.StopAll()
+	}
+	if rec != nil {
+		prog.SetPersist(rec.Save)
+		prog.SetOnClear(rec.Rotate)
+		if len(mgr.Messages()) > 0 {
+			prog.Restore(mgr.Messages(), "Continued session "+rec.ID())
+		}
+	}
+	if len(picker) > 0 && rec != nil {
+		store := session.Open(session.DefaultRoot())
+		prog.OfferSessions(picker, notes, func(id string) (string, []api.Message, error) {
+			tr, err := store.Load(workDir, id)
+			if err != nil {
+				return "", nil, err
+			}
+			tr.Messages = session.CloseDangling(tr.Messages)
+			mgr.Reset()
+			for _, msg := range tr.Messages {
+				mgr.Append(msg)
+			}
+			rec.Use(tr.ID)
+			return tr.ID, mgr.Messages(), nil
+		})
+	}
+	if len(picker) == 0 {
+		for _, note := range notes {
+			prog.Note(note)
+		}
+	}
 	if err := prog.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -333,18 +497,42 @@ func runHeadless(
 	workDir string,
 	dw *dream.Worker,
 	cmdExec *commands.Executor,
+	rec *session.Recorder,
 ) {
 	ctx, cancelTimeout := headlessTimeout(ctx)
 	defer cancelTimeout()
 
 	eventCh := make(chan agent.Event, 256)
 	eng := headlessPermissionEngine(settings, workDir)
-	loop := agent.NewLoop(client, mgr, registry, eng, eventCh)
+	driver := agent.NewAnthropicInferenceDriver(client)
+	executor := agent.NewDefaultToolExecutor(registry, eng, eventCh)
+	loop := agent.NewLoop(driver, mgr, executor, registry, eventCh)
+	var bashTool *shellpkg.Bash
+	backgroundDone := make(chan shellpkg.Notice, 16)
+	if b, ok := registry.Get("bash").(*shellpkg.Bash); ok && b.AllowBackground {
+		bashTool = b
+		b.SetOnDone(func(n shellpkg.Notice) {
+			if n.Done {
+				backgroundDone <- n
+			}
+		})
+		stopBackground = b.StopAll
+		defer func() { stopBackground = nil }()
+		defer b.StopAll()
+	}
+	if rec != nil {
+		loop.SetPersist(rec.Save)
+		if len(mgr.Messages()) > 0 {
+			fmt.Fprintf(os.Stderr, "drover-code: continuing %s\n", rec.ID())
+		}
+	}
 	config.ApplyAgentLoopOptions(loop, settings)
 	if n := headlessMaxSessionTokens(); n > 0 {
 		loop.SetMaxSessionTokens(n)
 	}
 	useJSONL := headlessUseJSONL()
+	headlessSession = sessionLogFromEnv()
+	headlessSession.begin()
 	if useJSONL {
 		go drainHeadlessJSONL(eventCh)
 	} else {
@@ -354,6 +542,30 @@ func runHeadless(
 	if dw != nil {
 		dw.Start(ctx)
 	}
+
+	// PHASE 5: Watchdog goroutine enforcing wall-clock timeout and token budget outside the agent loop.
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		maxTokens := headlessMaxSessionTokens()
+		for {
+			select {
+			case <-ctx.Done():
+				if ctx.Err() == context.DeadlineExceeded {
+					fmt.Fprintln(os.Stderr, "drover-code: watchdog: wall-clock timeout exceeded")
+					writeHeadlessResultFile(workDir, loop, false, 0, "timeout exceeded (watchdog)")
+					exitHeadless(4, "failed")
+				}
+				return // Normal exit or context cancellation
+			case <-ticker.C:
+				if maxTokens > 0 && loop.SessionOutputTokens() > maxTokens {
+					fmt.Fprintln(os.Stderr, "drover-code: watchdog: token budget exceeded")
+					writeHeadlessResultFile(workDir, loop, false, 0, "token budget exceeded (watchdog)")
+					exitHeadless(4, "failed")
+				}
+			}
+		}
+	}()
 
 	hadErr := false
 	exitCode := 1
@@ -365,7 +577,7 @@ func runHeadless(
 		if input == "" || input == "/quit" {
 			return false
 		}
-		
+
 		if strings.HasPrefix(input, "/") {
 			parts := strings.Fields(input)
 			cmdName := strings.TrimPrefix(parts[0], "/")
@@ -381,15 +593,32 @@ func runHeadless(
 					}
 				}
 				return false
+			} else if cmdName == "score" {
+				if len(parts) < 2 {
+					fmt.Fprintln(os.Stderr, "Usage: /score <value> [comment...]")
+					return false
+				}
+				val, err := strconv.ParseFloat(parts[1], 64)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Invalid score: %v\n", err)
+					return false
+				}
+				comment := strings.Join(parts[2:], " ")
+				traceID := loop.LastTraceID()
+				if traceID == "" {
+					fmt.Fprintln(os.Stderr, "No previous trace to score.")
+					return false
+				}
+				telemetry.TracerFrom(ctx).Score(traceID, "user_feedback", val, telemetry.ScoreSourceHuman, comment)
+				fmt.Fprintf(os.Stderr, "Score %v recorded for trace %s\n", val, traceID)
+				return false
 			}
 
 			if expanded, cmdDef, err := cmdExec.EvaluateAndExpand(ctx, cmdName, parts[1:]); err == nil {
 				input = expanded
 				// Handle model/agent overrides if set
 				if cmdDef.Model != "" {
-					loopClient := api.NewClient(anthropicAPIKey(), cmdDef.Model)
-					api.ApplyGatewayEnv(loopClient)
-					loop.SetClient(loopClient)
+					loop.SetDriver(agent.NewAnthropicInferenceDriver(client.WithModel(cmdDef.Model)))
 				}
 			} else if !strings.Contains(err.Error(), "not found") {
 				if strings.Contains(err.Error(), "Drover Guard") {
@@ -401,15 +630,26 @@ func runHeadless(
 			}
 		}
 
+		headlessSession.userMessage(input)
 		err := loop.Run(ctx, input)
 		sumTurns += loop.LastRunTurns()
 		if err != nil {
 			hadErr = true
 			lastAgentErr = err
 			exitCode = headlessExitCode(err)
-			if useJSONL {
-				fmt.Fprintf(os.Stderr, "drover-code: agent error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "drover-code: agent error: %v\n", err)
+			return true
+		}
+		for {
+			n, err := feedBackgroundResults(ctx, loop, bashTool, backgroundDone)
+			sumTurns += n
+			if err == nil {
+				break
 			}
+			hadErr = true
+			lastAgentErr = err
+			exitCode = headlessExitCode(err)
+			fmt.Fprintf(os.Stderr, "drover-code: agent error: %v\n", err)
 			return true
 		}
 		return false
@@ -429,7 +669,7 @@ func runHeadless(
 				dw.Wait()
 			}
 			writeHeadlessResultFile(workDir, loop, false, sumTurns, err.Error())
-			os.Exit(2)
+			exitHeadless(2, "failed")
 		}
 		if stop := runOne(string(b)); stop {
 			break
@@ -448,7 +688,7 @@ func runHeadless(
 				dw.Wait()
 			}
 			writeHeadlessResultFile(workDir, loop, false, sumTurns, err.Error())
-			os.Exit(2)
+			exitHeadless(2, "failed")
 		}
 	}
 
@@ -464,14 +704,55 @@ func runHeadless(
 	writeHeadlessResultFile(workDir, loop, overallOK, sumTurns, errMsg)
 
 	if hadErr {
-		os.Exit(exitCode)
+		exitHeadless(exitCode, "failed")
 	}
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			os.Exit(4)
+			exitHeadless(4, "failed")
 		}
-		os.Exit(1)
+		exitHeadless(1, "failed")
 	}
+	headlessSession.finish("completed")
+}
+
+func feedBackgroundResults(ctx context.Context, loop *agent.Loop, bashTool *shellpkg.Bash, done <-chan shellpkg.Notice) (int, error) {
+	if bashTool == nil {
+		return 0, nil
+	}
+	var turns int
+	for {
+		if bashTool.Running() == 0 {
+			select {
+			case res := <-done:
+				n, err := runBackgroundResult(ctx, loop, res)
+				turns += n
+				if err != nil {
+					return turns, err
+				}
+				continue
+			default:
+				return turns, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			bashTool.StopAll()
+			return turns, ctx.Err()
+		case res := <-done:
+			n, err := runBackgroundResult(ctx, loop, res)
+			turns += n
+			if err != nil {
+				return turns, err
+			}
+		}
+	}
+}
+
+func runBackgroundResult(ctx context.Context, loop *agent.Loop, res shellpkg.Notice) (int, error) {
+	fmt.Fprintf(os.Stderr, "\n%s\n", res.Output)
+	headlessSession.userMessage(res.Output)
+	err := loop.Run(ctx, res.Output)
+	return loop.LastRunTurns(), err
 }
 
 func headlessExitCode(err error) int {
@@ -586,7 +867,9 @@ func runBridgeMode(
 		filepath.Join(workDir, ".claude", "permissions.json"),
 		tools.AllowAll,
 	)
-	loop := agent.NewLoop(client, mgr, registry, eng, eventCh)
+	driver := agent.NewAnthropicInferenceDriver(client)
+	executor := agent.NewDefaultToolExecutor(registry, eng, eventCh)
+	loop := agent.NewLoop(driver, mgr, executor, registry, eventCh)
 	config.ApplyAgentLoopOptions(loop, settings)
 	go func() {
 		for range eventCh {
@@ -601,7 +884,9 @@ func runBridgeMode(
 	b := bridge.NewStdioBridge()
 	bridge.RegisterStandardHandlers(b, func(bCtx context.Context, input string) (string, error) {
 		innerCh := make(chan agent.Event, 256)
-		innerLoop := agent.NewLoop(client, mgr, registry, eng, innerCh)
+		innerDriver := agent.NewAnthropicInferenceDriver(client)
+		innerExecutor := agent.NewDefaultToolExecutor(registry, eng, innerCh)
+		innerLoop := agent.NewLoop(innerDriver, mgr, innerExecutor, registry, innerCh)
 		config.ApplyAgentLoopOptions(innerLoop, settings)
 		var out strings.Builder
 		done := make(chan struct{})
@@ -871,16 +1156,35 @@ Custom commands are force multipliers. Use them liberally to maintain consistenc
 		b.WriteString("\n\nProject-specific instructions:\n")
 		b.WriteString(projectMarkdown)
 	}
+	if os.Getenv("DROVER_CODE_PERMISSION_PRESET") != permissions.PresetUnikernel {
+		b.WriteString("\n\nLocal tools: web_search finds pages, web_fetch reads one URL, read_skill loads one skill body, and todo replaces the session checklist. MCP tools are named mcp_{server}_{tool}.\n")
+		if p := skills.Prompt(workDir); p != "" {
+			b.WriteString("\n")
+			b.WriteString(p)
+		}
+	}
 	return b.String()
+}
+
+func registerLocalHarness(reg *tools.Registry, workDir string) {
+	if os.Getenv("DROVER_CODE_PERMISSION_PRESET") == permissions.PresetUnikernel {
+		return
+	}
+	reg.Register(webpkg.NewSearch())
+	reg.Register(&skills.ReadTool{WorkDir: workDir})
+	reg.Register(&todopkg.List{})
 }
 
 func printEvents(ch <-chan agent.Event) {
 	for event := range ch {
+		recordSessionObserve(event)
 		switch e := event.(type) {
 		case agent.TextDeltaEvent:
 			fmt.Print(e.Text)
 		case agent.ToolStartEvent:
 			fmt.Fprintf(os.Stderr, "\n⚙  %s\n", e.InputSummary)
+		case agent.TodoEvent:
+			fmt.Fprintf(os.Stderr, "\n%s\n", e.Text)
 		case agent.ToolDoneEvent:
 			if e.IsError {
 				fmt.Fprintf(os.Stderr, "✗  %s\n", e.OutputSummary)
@@ -921,6 +1225,83 @@ func headlessUseJSONL() bool {
 	}
 	// Pipe / redirect → JSONL; interactive terminal → plain text on stdout.
 	return (stat.Mode() & os.ModeCharDevice) == 0
+}
+
+func sessionResumeRequested() bool {
+	return startupFlags.Continue || startupFlags.ResumeID != "" || startupFlags.ResumeList
+}
+
+func localSessionEnabled(settings config.Settings) bool {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("DROVER_CODE_PERMISSION_PRESET")), permissions.PresetUnikernel) {
+		return false
+	}
+	if startupFlags.CloudMode || startupFlags.CoordinatorRemote {
+		return false
+	}
+	if envTruthy("DROVER_CODE_IDE_BRIDGE") || envTruthy("DROVER_CODE_COORDINATOR_MODE") {
+		return false
+	}
+	if settings.CoordinatorMode || settings.CoordinatorRemote {
+		return false
+	}
+	return true
+}
+
+func loadSavedSession(store *session.Store, workDir string) (session.Transcript, error) {
+	var (
+		tr  session.Transcript
+		err error
+	)
+	if startupFlags.ResumeID != "" {
+		tr, err = store.Load(workDir, startupFlags.ResumeID)
+	} else {
+		tr, err = store.LoadLatest(workDir)
+	}
+	if err != nil {
+		return session.Transcript{}, err
+	}
+	tr.Messages = session.CloseDangling(tr.Messages)
+	return tr, nil
+}
+
+func listSavedSessions(workDir string) ([]tui.SessionRow, error) {
+	root := session.DefaultRoot()
+	if root == "" {
+		return nil, fmt.Errorf("cannot find the home directory for saved sessions")
+	}
+	rows, err := session.Open(root).List(workDir, 20)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]tui.SessionRow, len(rows))
+	for i, row := range rows {
+		out[i] = tui.SessionRow{
+			ID:      row.ID,
+			When:    row.Updated.Local().Format("2006-01-02 15:04"),
+			Preview: row.Preview,
+		}
+	}
+	return out, nil
+}
+
+func printSessionList(workDir string) {
+	root := session.DefaultRoot()
+	if root == "" {
+		fmt.Fprintln(os.Stderr, "drover-code: cannot find the home directory for saved sessions")
+		os.Exit(2)
+	}
+	rows, err := session.Open(root).List(workDir, 20)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "drover-code: %v\n", err)
+		os.Exit(2)
+	}
+	if len(rows) == 0 {
+		fmt.Println("No saved sessions in this directory yet. A session is stored after the first completed reply. Quit, then run drover-code -c or drover-code --resume.")
+		return
+	}
+	for _, row := range rows {
+		fmt.Printf("%s  %s  %s\n", row.ID, row.Updated.Local().Format("2006-01-02 15:04"), row.Preview)
+	}
 }
 
 // wantsHeadlessMode returns true when headless (non-TUI) execution is requested.

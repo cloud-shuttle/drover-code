@@ -114,11 +114,11 @@ func TestOpenStore_migratesJSONWhenSQLiteEmpty(t *testing.T) {
 	t.Setenv("DROVER_CODE_DREAM_BACKEND", "sqlite")
 	t.Setenv("DROVER_CODE_DREAM_SKIP_JSON_IMPORT", "")
 	dir := t.TempDir()
-	claudeDir := filepath.Join(dir, ".drover")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+	droverDir := filepath.Join(dir, ".drover")
+	if err := os.MkdirAll(droverDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	jsonPath := filepath.Join(claudeDir, "memory.json")
+	jsonPath := filepath.Join(droverDir, "memory.json")
 	payload := `[{"id":"legacy-1","timestamp":"2020-01-15T12:00:00Z","tags":[],"content":"from json","session_id":"s"}]`
 	if err := os.WriteFile(jsonPath, []byte(payload), 0o644); err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestOpenStore_migratesJSONWhenSQLiteEmpty(t *testing.T) {
 	if all[0].Content != "from json" || all[0].ID != "legacy-1" {
 		t.Fatalf("entry: %#v", all[0])
 	}
-	if _, err := os.Stat(jsonPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(droverDir, "memory.json")); !os.IsNotExist(err) {
 		t.Fatalf("json should be renamed after import: stat err=%v", err)
 	}
 	bak := jsonPath + ".imported"
@@ -147,11 +147,11 @@ func TestOpenStore_skipsImportWhenEnvSet(t *testing.T) {
 	t.Setenv("DROVER_CODE_DREAM_BACKEND", "sqlite")
 	t.Setenv("DROVER_CODE_DREAM_SKIP_JSON_IMPORT", "1")
 	dir := t.TempDir()
-	claudeDir := filepath.Join(dir, ".drover")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+	droverDir := filepath.Join(dir, ".drover")
+	if err := os.MkdirAll(droverDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	jsonPath := filepath.Join(claudeDir, "memory.json")
+	jsonPath := filepath.Join(droverDir, "memory.json")
 	if err := os.WriteFile(jsonPath, []byte(`[{"id":"x","timestamp":"2020-01-15T12:00:00Z","content":"c"}]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -175,18 +175,18 @@ func TestSQLiteStore_CloseAndErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Close the store
 	sq := s.(*sqliteStore)
 	if err := sq.Close(); err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Double close should be fine
 	if err := sq.Close(); err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Operations on closed DB should fail
 	if err := sq.Save(Entry{ID: "x"}); err == nil {
 		t.Fatal("expected save error on closed db")
@@ -200,7 +200,7 @@ func TestSQLiteStore_CloseAndErrors(t *testing.T) {
 	if err := sq.Prune(Retention{MaxAgeDays: 1}); err == nil {
 		t.Fatal("expected prune error on closed db")
 	}
-	
+
 	// Test invalid path for NewSQLiteStore
 	_, err = NewSQLiteStore("/dev/null/invalid/mem.db")
 	if err == nil {
@@ -219,7 +219,7 @@ func TestScanEntries_InvalidTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	all, err := sq.All()
 	if err != nil {
 		t.Fatal(err)

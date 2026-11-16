@@ -7,14 +7,18 @@ import (
 
 // cliFlags holds global CLI options parsed before subsystems start.
 type cliFlags struct {
-	Headless    bool
-	Prompt      string
+	Headless          bool
+	Prompt            string
 	PromptFile        string
 	ResultJSON        string
 	CoordinatorRemote bool
 	CloudMode         bool
 	AcceptCmd         string
 	Verbose           bool
+	LinearIssue       string
+	Continue          bool
+	ResumeID          string
+	ResumeList        bool
 }
 
 // parseCLIFlags extracts known flags from argv. Unknown tokens are ignored so
@@ -66,6 +70,30 @@ func parseCLIFlags(argv []string) (cliFlags, error) {
 			f.AcceptCmd = argv[i]
 		case strings.HasPrefix(a, "--accept-cmd="):
 			f.AcceptCmd = strings.TrimPrefix(a, "--accept-cmd=")
+		case a == "-c" || a == "--continue":
+			f.Continue = true
+		case a == "-r" || a == "--resume":
+			if i+1 < len(argv) && argv[i+1] != "" && !strings.HasPrefix(argv[i+1], "-") {
+				i++
+				f.ResumeID = argv[i]
+			} else {
+				f.ResumeList = true
+			}
+		case strings.HasPrefix(a, "--resume="):
+			id := strings.TrimPrefix(a, "--resume=")
+			if id == "" {
+				f.ResumeList = true
+			} else {
+				f.ResumeID = id
+			}
+		case a == "--linear-issue":
+			if i+1 >= len(argv) {
+				return f, fmt.Errorf("%s: issue ID required", a)
+			}
+			i++
+			f.LinearIssue = argv[i]
+		case strings.HasPrefix(a, "--linear-issue="):
+			f.LinearIssue = strings.TrimPrefix(a, "--linear-issue=")
 		default:
 			// ignore unknown
 		}

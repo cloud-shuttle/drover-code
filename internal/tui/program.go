@@ -2,10 +2,13 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -15,16 +18,59 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/config"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
+	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
+	liveregion "github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
+	"github.com/cloudshuttle/drover-code/internal/tui/core"
+	"github.com/cloudshuttle/drover-code/internal/tui/styles"
 )
 
 type Program struct {
-	tea     *tea.Program
-	model   *Model
-	loop    *agent.Loop
-	eventCh chan agent.Event
-	ctx     context.Context
-	cancel  context.CancelFunc
+	tea         *tea.Program
+	model       *Model
+	loop        *agent.Loop
+	eventCh     chan agent.Event
+	ctx         context.Context
+	cancel      context.CancelFunc
+	resumeNotes []string
+	askMu       sync.Mutex
+}
+
+// AskUser shows one question in the TUI and waits for a typed answer.
+// ponytail: one question at a time; a form when a second question must be asked together.
+func (p *Program) AskUser(ctx context.Context, question string) (string, error) {
+	if p == nil || p.eventCh == nil || p.ctx == nil {
+		return "", errors.New("not available in this session")
+	}
+	p.askMu.Lock()
+	defer p.askMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	reply := make(chan agent.AskUserReply, 1)
+	select {
+	case p.eventCh <- agent.AskUserEvent{Question: question, ReplyCh: reply}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-p.ctx.Done():
+		return "", p.ctx.Err()
+	}
+	select {
+	case r := <-reply:
+		if !r.OK {
+			return "", errors.New("the user dismissed the question")
+		}
+		text := strings.TrimSpace(r.Text)
+		if text == "" {
+			return "", errors.New("empty answer")
+		}
+		return text, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-p.ctx.Done():
+		return "", p.ctx.Err()
+	}
 }
 
 func NewProgram(
@@ -36,6 +82,7 @@ func NewProgram(
 	settings config.Settings,
 	workDir string,
 	cmdExec *commands.Executor,
+	themeSaveFn func(mode, palette string) error,
 ) *Program {
 	eventCh := make(chan agent.Event, 512)
 	ctx, cancel := context.WithCancel(baseCtx)
@@ -52,7 +99,9 @@ func NewProgram(
 		permitFn,
 	)
 
-	loop := agent.NewLoop(client, convoMgr, registry, eng, eventCh)
+	driver := agent.NewAnthropicInferenceDriver(client)
+	executor := agent.NewDefaultToolExecutor(registry, eng, eventCh)
+	loop := agent.NewLoop(driver, convoMgr, executor, registry, eventCh)
 	config.ApplyAgentLoopOptions(loop, settings)
 	userName := strings.TrimSpace(os.Getenv("USER"))
 	if userName == "" {
@@ -67,6 +116,7 @@ func NewProgram(
 	}
 	model := New(eventCh, modelName, workDir, userName, hostName)
 	model.SetConversation(convoMgr)
+	wirePlanMode(model, eng, convoMgr)
 
 	p := &Program{
 		loop:    loop,
@@ -84,6 +134,58 @@ func NewProgram(
 			descs = append(descs, c.Description)
 		}
 		model.RegisterCustomCommands(names, descs)
+
+		// Rich Command Palette integration using the new extensibility APIs.
+		//
+		// 1. Use a CommandProvider so the list of custom commands is dynamic
+		//    (reflects commands added/removed at runtime) and carries rich
+		//    metadata (Category + RiskLevel derived from RiskTier).
+		model.RegisterPaletteProvider(func() []commandpalette.Command {
+			var paletteCmds []commandpalette.Command
+			for _, c := range cmdExec.GetRegistry().List() {
+				risk := "normal"
+				switch {
+				case c.RiskTier >= 2:
+					risk = "high"
+				case c.RiskTier >= 1:
+					risk = "caution"
+				}
+
+				actionKey := "custom:" + c.Name
+
+				paletteCmds = append(paletteCmds, commandpalette.Command{
+					Name:        c.Name,
+					Description: c.Description,
+					Category:    "Custom",
+					RiskLevel:   risk,
+					ActionKey:   actionKey, // mark as semantic action
+				})
+			}
+			return paletteCmds
+		})
+
+		// 2. Register handlers so that selecting a custom command from the
+		//    palette executes it *directly* (instead of just injecting text).
+		//    This is the power of RegisterPaletteActionHandler.
+		for _, c := range cmdExec.GetRegistry().List() {
+			name := c.Name
+			actionKey := "custom:" + name
+
+			model.RegisterPaletteActionHandler(actionKey, func(key string) tea.Cmd {
+				cmdToRun := "/" + name
+
+				// Update the visible input (nice UX feedback)
+				model.InputArea.SetValue(cmdToRun + " ")
+				model.InputArea.CursorEnd()
+
+				// Execute directly via the normal run path.
+				// This is equivalent to the user typing the command and pressing Enter.
+				if model.runFunc != nil {
+					return model.runFunc(cmdToRun)
+				}
+				return nil
+			})
+		}
 	}
 
 	model.SetRunFunc(func(input string) tea.Cmd {
@@ -106,7 +208,7 @@ func NewProgram(
 						}
 						return nil
 					}
-					
+
 					// default to list
 					cmds := cmdExec.GetRegistry().List()
 					var b strings.Builder
@@ -132,12 +234,31 @@ func NewProgram(
 					}
 					convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: b.String()}}))
 					return nil
+				} else if cmdName == "score" {
+					if len(parts) < 2 {
+						convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: "Usage: `/score <value> [comment...]`"}}))
+						return nil
+					}
+					val, err := strconv.ParseFloat(parts[1], 64)
+					if err != nil {
+						convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: fmt.Sprintf("Invalid score: %v", err)}}))
+						return nil
+					}
+					comment := strings.Join(parts[2:], " ")
+					traceID := loop.LastTraceID()
+					if traceID == "" {
+						convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: "No previous trace to score."}}))
+						return nil
+					}
+					telemetry.TracerFrom(ctx).Score(traceID, "user_feedback", val, telemetry.ScoreSourceHuman, comment)
+					convoMgr.Append(api.AssistantMessage([]api.ContentBlock{api.TextBlock{Text: fmt.Sprintf("✅ Score %v recorded for trace `%s`", val, traceID)}}))
+					return nil
 				}
 
 				if expanded, cmdDef, err := cmdExec.EvaluateAndExpand(runCtx, cmdName, parts[1:]); err == nil {
 					input = expanded
 					if cmdDef.Model != "" {
-						loop.SetClient(api.NewClient(os.Getenv("ANTHROPIC_API_KEY"), cmdDef.Model))
+						loop.SetDriver(agent.NewAnthropicInferenceDriver(client.WithModel(cmdDef.Model)))
 					}
 				} else if !strings.Contains(err.Error(), "not found") {
 					if strings.Contains(err.Error(), "Drover Guard") {
@@ -146,19 +267,171 @@ func NewProgram(
 					return fmt.Errorf("command error: %v", err)
 				}
 			}
+			if input == "__internal_resume__" {
+				// Resume: continue the agent loop with existing convo state, no new user message.
+				return loop.Run(runCtx, "")
+			}
 			return loop.Run(runCtx, input)
 		})
 	})
 	model.SetCompactFn(func() error {
 		return loop.CompactContext(ctx)
 	})
+	if themeSaveFn != nil {
+		model.SetThemeSaveFn(themeSaveFn)
+	}
 
+	// Visual theme picker in the Command Palette (Theme System)
+	model.RegisterPaletteProvider(func() []commandpalette.Command {
+		var cmds []commandpalette.Command
+		for name := range styles.NamedPalettes {
+			for _, mode := range []styles.ThemeMode{styles.ThemeLight, styles.ThemeDark, styles.ThemeAuto} {
+				displayMode := string(mode)
+				if mode == styles.ThemeAuto {
+					displayMode = "auto"
+				}
+				// Human-friendly name (Title() will suppress the leading / for these)
+				displayName := name
+				if name == "default" {
+					displayName = "Default"
+				} else if name == "high-contrast" {
+					displayName = "High-Contrast"
+				}
+				modeTitle := displayMode
+				if displayMode == "light" {
+					modeTitle = "Light"
+				} else if displayMode == "dark" {
+					modeTitle = "Dark"
+				} else {
+					modeTitle = "Auto"
+				}
+				cmds = append(cmds, commandpalette.Command{
+					Name:        displayName + " " + modeTitle,
+					Description: "Switch UI to the " + displayName + " palette (" + displayMode + " mode). Custom colors from settings are preserved.",
+					ActionKey:   "theme:" + name + ":" + string(mode),
+					Category:    "Theme",
+				})
+			}
+		}
+		return cmds
+	})
+
+	// Handle theme actions from the palette
+	model.RegisterPaletteActionHandler("theme:", func(key string) tea.Cmd {
+		// key is like "theme:default:dark"
+		parts := strings.Split(key, ":")
+		if len(parts) >= 3 {
+			name := parts[1]
+			modeStr := parts[2]
+			mode := styles.ThemeMode(modeStr)
+			styles.SetNamedPalette(name, mode)
+
+			// Persist if possible
+			if model.themeSaveFn != nil {
+				_ = model.themeSaveFn(modeStr, name)
+			}
+			model.relayout()
+		}
+		return nil
+	})
+
+	// Filter out terminal control sequences (especially OSC color queries like
+	// "]11rgb:..." or "]11;rgb:...") that can leak into the input stream on
+	// startup or with certain terminals. Without this, they end up in the
+	// textarea and get sent to the model (or just look like garbage in the prompt).
 	p.tea = tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
+		tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+			if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyRunes {
+				s := string(key.Runes)
+				clean := liveregion.StripTerminalOSCResponses(s)
+				clean = liveregion.StripCursorPositionReports(clean)
+				clean = liveregion.StripStandaloneBackslashLines(clean)
+				clean = liveregion.StripBareRGBTriplets(clean)
+				if clean == "" {
+					return nil // drop the message entirely
+				}
+				if clean != s {
+					key.Runes = []rune(clean)
+					return key
+				}
+			}
+			return msg
+		}),
 	)
 
 	return p
+}
+
+// Note shows an operator message in the transcript before the first prompt.
+func (p *Program) Note(text string) {
+	if p == nil || p.model == nil || p.model.HistoryView == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	p.model.HistoryView.AppendTurn(core.RenderedTurn{Role: "system", Content: text})
+}
+
+// Send delivers a message to the running TUI.
+func (p *Program) Send(msg tea.Msg) {
+	if p == nil || p.tea == nil || msg == nil {
+		return
+	}
+	p.tea.Send(msg)
+}
+
+// SetPersist saves the conversation after each completed message in the loop.
+func (p *Program) SetPersist(fn func()) {
+	if p != nil && p.loop != nil {
+		p.loop.SetPersist(fn)
+	}
+}
+
+// SetOnClear starts a fresh saved session when the operator clears the chat.
+func (p *Program) SetOnClear(fn func()) {
+	if p != nil && p.model != nil {
+		p.model.SetOnClear(fn)
+	}
+}
+
+// OfferSessions opens the resume picker. load receives the chosen id.
+func (p *Program) OfferSessions(rows []SessionRow, notes []string, load func(id string) (string, []api.Message, error)) {
+	if p == nil || p.model == nil || len(rows) == 0 || load == nil {
+		return
+	}
+	p.resumeNotes = append([]string(nil), notes...)
+	p.model.showingSessions = true
+	p.model.sessionRows = append([]SessionRow(nil), rows...)
+	p.model.sessionCursor = 0
+	p.model.sessionQuery = ""
+	p.model.loadSession = func(id string) error {
+		fullID, msgs, err := load(id)
+		if err != nil {
+			return err
+		}
+		p.model.showingSessions = false
+		p.Restore(msgs, "Continued session "+fullID)
+		for _, note := range p.resumeNotes {
+			p.Note(note)
+		}
+		return nil
+	}
+}
+
+// Restore paints a saved transcript before the first prompt.
+func (p *Program) Restore(msgs []api.Message, note string) {
+	if p == nil || p.model == nil || p.model.HistoryView == nil {
+		return
+	}
+	turns := turnsFromMessages(msgs)
+	if strings.TrimSpace(note) != "" {
+		turns = append(turns, core.RenderedTurn{Role: "system", Content: note})
+	}
+	if len(turns) == 0 {
+		return
+	}
+	p.model.HistoryView.SetTurns(turns)
+	p.model.HistoryView.GotoBottom()
 }
 
 func (p *Program) Run() error {

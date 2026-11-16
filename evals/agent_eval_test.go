@@ -139,7 +139,9 @@ func (r *Runner) Run(t *testing.T, c Case) *Result {
 		"",
 		tools.AllowAll,
 	)
-	loop := agent.NewLoop(client, mgr, registry, eng, eventCh)
+	driver := agent.NewAnthropicInferenceDriver(client)
+	executor := agent.NewDefaultToolExecutor(registry, eng, eventCh)
+	loop := agent.NewLoop(driver, mgr, executor, registry, eventCh)
 
 	start := time.Now()
 	err := loop.Run(ctx, c.Input)

@@ -21,6 +21,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/config"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
+	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
 	"github.com/cloudshuttle/drover-code/pkg/workercontract/client"
@@ -77,9 +78,9 @@ func (c *Coordinator) Execute(ctx context.Context, task string) (string, error) 
 
 func (c *Coordinator) ExecuteWithResults(ctx context.Context, task string) (ExecuteOutcome, error) {
 	var z ExecuteOutcome
-	
+
 	c.eventCh <- agent.TextDeltaEvent{Text: "Decomposing task into subtasks via Anthropic API...\n"}
-	
+
 	subtasks, err := c.decompose(ctx, task)
 	if err != nil {
 		return z, fmt.Errorf("coordinator: decompose: %w", err)
@@ -116,18 +117,46 @@ Task: %s`, task)
 	mgr := convo.NewManager()
 	mgr.Append(api.UserMessage(prompt))
 
-	stream, err := c.client.StreamMessage(ctx, api.StreamRequest{
+	req := api.StreamRequest{
 		Messages:  mgr.Messages(),
 		MaxTokens: 512,
+	}
+
+	tracer := telemetry.TracerFrom(ctx)
+	genID := tracer.StartGeneration(telemetry.GenerationParams{
+		TraceID:   telemetry.TraceIDFrom(ctx),
+		Name:      "coordinator-decompose",
+		Model:     c.client.Model(),
+		Input:     req.Messages,
+		System:    req.System,
+		MaxTokens: req.MaxTokens,
 	})
+
+	var usage api.Usage
+	var stopReason string
+	var streamErr error
+	var raw strings.Builder
+
+	defer func() {
+		tracer.EndGeneration(genID, telemetry.GenerationResult{
+			Output:       extractJSON(raw.String()),
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			StopReason:   stopReason,
+			Error:        streamErr,
+		})
+	}()
+
+	stream, err := c.client.StreamMessage(ctx, req)
 	if err != nil {
+		streamErr = err
 		return nil, err
 	}
 	defer stream.Close()
 
-	var raw strings.Builder
 	for stream.Next() {
-		if e, ok := stream.Event().(api.ContentBlockDeltaEvent); ok {
+		switch e := stream.Event().(type) {
+		case api.ContentBlockDeltaEvent:
 			if td, ok := e.Delta.(api.TextDelta); ok {
 				raw.WriteString(td.Text)
 				select {
@@ -135,10 +164,15 @@ Task: %s`, task)
 				default:
 				}
 			}
+		case api.MessageDeltaEvent:
+			usage.InputTokens = e.InputTokens
+			usage.OutputTokens = e.OutputTokens
+			stopReason = e.StopReason
 		}
 	}
 	if stream.Err() != nil {
-		return nil, stream.Err()
+		streamErr = stream.Err()
+		return nil, streamErr
 	}
 	select {
 	case c.eventCh <- agent.TextDeltaEvent{Text: "\n"}:
@@ -239,11 +273,13 @@ func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, 
 	workerEvents := make(chan agent.Event, 128)
 	go c.forwardWorkerEvents(st.Index, workerEvents)
 
+	workerDriver := agent.NewAnthropicInferenceDriver(c.client)
+	workerExecutor := agent.NewDefaultToolExecutor(reg, permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll), workerEvents)
 	workerLoop := agent.NewLoop(
-		c.client,
+		workerDriver,
 		workerMgr,
+		workerExecutor,
 		reg,
-		permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll),
 		workerEvents,
 	)
 	config.ApplyAgentLoopOptions(workerLoop, c.settings)
@@ -295,7 +331,7 @@ func (c *Coordinator) buildCustomToolchain(ctx context.Context) (string, error) 
 
 	defaultImage := mgr.Config().DefaultImage
 	parts := strings.Split(defaultImage, "/")
-	
+
 	var registry, namespace string
 	if len(parts) >= 3 {
 		registry = parts[0]
@@ -341,14 +377,16 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 	}
 
 	name := fmt.Sprintf("drover-worker-%d-%d", st.Index, time.Now().Unix())
-	
+
 	env := map[string]string{
-		"DROVER_CODE_HEADLESS":         "1",
+		"DROVER_CODE_HEADLESS":          "1",
 		"DROVER_CODE_PERMISSION_PRESET": "unikernel",
 	}
 	for _, k := range []string{
-		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-		"ANTHROPIC_MODEL", "OPENAI_MODEL", "GEMINI_MODEL",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
+		"SGLANG_API_KEY", "SERVED_MODEL_NAME", "DROVER_LLM_PROVIDER",
+		"GEMINI_API_KEY", "GEMINI_MODEL",
 	} {
 		if v := os.Getenv(k); v != "" {
 			env[k] = v
@@ -403,14 +441,14 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 	}
 
 	res, err := client.RunAgentJob(ctx, mgr.Config(), client.JobSpec{
-		Name:         name,
-		Image:        img,
-		MemoryMB:     512,
-		Env:          env,
-		Command:      command,
-		WorkDir:      c.workDir,
-		DownloadDir:  downloadDir,
-		Limits:       workspace.DefaultLimits(),
+		Name:        name,
+		Image:       img,
+		MemoryMB:    512,
+		Env:         env,
+		Command:     command,
+		WorkDir:     c.workDir,
+		DownloadDir: downloadDir,
+		Limits:      workspace.DefaultLimits(),
 		OnEvent: func(msg string) {
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] %s\n", st.Index+1, msg)}
 		},
@@ -479,7 +517,7 @@ func (c *Coordinator) synthesise(ctx context.Context, originalTask string, resul
 			fmt.Fprintf(&b, "- **Worker %d** (%s): %s\n", r.Index+1, r.Task, status)
 		}
 		fmt.Fprintf(&b, "\n✨ Parallel tasks complete.\n")
-		
+
 		// Send it to the terminal exactly like the stream does
 		c.eventCh <- agent.TextDeltaEvent{Text: b.String()}
 		return b.String(), nil
@@ -500,18 +538,46 @@ func (c *Coordinator) synthesise(ctx context.Context, originalTask string, resul
 	mgr := convo.NewManager()
 	mgr.Append(api.UserMessage(b.String()))
 
-	stream, err := c.client.StreamMessage(ctx, api.StreamRequest{
+	req := api.StreamRequest{
 		Messages:  mgr.Messages(),
 		MaxTokens: 2048,
+	}
+
+	tracer := telemetry.TracerFrom(ctx)
+	genID := tracer.StartGeneration(telemetry.GenerationParams{
+		TraceID:   telemetry.TraceIDFrom(ctx),
+		Name:      "coordinator-synthesise",
+		Model:     c.client.Model(),
+		Input:     req.Messages,
+		System:    req.System,
+		MaxTokens: req.MaxTokens,
 	})
+
+	var usage api.Usage
+	var stopReason string
+	var streamErr error
+	var summary strings.Builder
+
+	defer func() {
+		tracer.EndGeneration(genID, telemetry.GenerationResult{
+			Output:       summary.String(),
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			StopReason:   stopReason,
+			Error:        streamErr,
+		})
+	}()
+
+	stream, err := c.client.StreamMessage(ctx, req)
 	if err != nil {
+		streamErr = err
 		return "", err
 	}
 	defer stream.Close()
 
-	var summary strings.Builder
 	for stream.Next() {
-		if e, ok := stream.Event().(api.ContentBlockDeltaEvent); ok {
+		switch e := stream.Event().(type) {
+		case api.ContentBlockDeltaEvent:
 			if td, ok := e.Delta.(api.TextDelta); ok {
 				summary.WriteString(td.Text)
 				select {
@@ -519,10 +585,15 @@ func (c *Coordinator) synthesise(ctx context.Context, originalTask string, resul
 				default:
 				}
 			}
+		case api.MessageDeltaEvent:
+			usage.InputTokens = e.InputTokens
+			usage.OutputTokens = e.OutputTokens
+			stopReason = e.StopReason
 		}
 	}
 	if stream.Err() != nil {
-		return "", stream.Err()
+		streamErr = stream.Err()
+		return "", streamErr
 	}
 	return summary.String(), nil
 }
@@ -576,7 +647,7 @@ func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, d
 	if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "add", ".").Run(); err != nil {
 		return fmt.Errorf("git add: %v", err)
 	}
-	
+
 	// We check if there's anything to commit first
 	statusCmd := exec.CommandContext(ctx, "git", "-C", c.workDir, "status", "--porcelain")
 	outBytes, _ := statusCmd.Output()
@@ -587,7 +658,7 @@ func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, d
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to commit changes: %v\n", st.Index+1, err)}
 		} else {
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ✅ Workspace committed to branch `%s`\n", st.Index+1, branchName)}
-			
+
 			if c.settings.AcceptCmd != "" {
 				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🔄 Running acceptance criteria: %s\n", st.Index+1, c.settings.AcceptCmd)}
 				acceptCmd := exec.CommandContext(ctx, "/bin/sh", "-c", c.settings.AcceptCmd)

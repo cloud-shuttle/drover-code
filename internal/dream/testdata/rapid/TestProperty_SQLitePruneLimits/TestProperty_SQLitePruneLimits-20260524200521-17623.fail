@@ -1,0 +1,29 @@
+# 2026/05/24 20:05:21.437503 [TestProperty_SQLitePruneLimits] [rapid] draw maxEntries: 0
+# 2026/05/24 20:05:21.437507 [TestProperty_SQLitePruneLimits] [rapid] draw maxAgeDays: 0
+# 2026/05/24 20:05:21.437510 [TestProperty_SQLitePruneLimits] [rapid] draw entries: []dream.Entry{dream.Entry{ID:"", Timestamp:time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC), Tags:[]string{}, Content:"", SessionID:""}, dream.Entry{ID:"", Timestamp:time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC), Tags:[]string{}, Content:"", SessionID:""}}
+# 2026/05/24 20:05:21.438633 [TestProperty_SQLitePruneLimits] Failed to save entry: dream sqlite: insert: constraint failed: UNIQUE constraint failed: dream_entries.id (1555)
+# 
+v0.4.8#6132751659998121071
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x5555555555555
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x5555555555555
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

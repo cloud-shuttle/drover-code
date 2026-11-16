@@ -67,6 +67,41 @@ This strategy ensures high confidence in TUI behavior, especially for complex fe
 #### 4.3 Custom Commands
 
 - Command loading & parsing (markdown + JSON)
+
+#### 4.8 Component Tests (New — 2026)
+
+With the introduction of the component architecture (see epic dcode-001 and `design/20-week-1-tui-component-migration.md`):
+
+- Every component in `internal/tui/components/*/` must have a `_test.go` focused on `View()` output.
+- Use table-driven tests with varying widths, states (busy, streaming, error), and content sizes.
+- Tests must run in <100ms and require no `tea.Program`.
+- Snapshot tests (`*_test.go` using golden files) remain the integrated visual contract.
+- When adding a new component, add its isolated test in the same PR.
+
+Example pattern (StatusBar / LiveRegion):
+```go
+func TestStatusBar_View(t *testing.T) {
+    tests := []struct{ name string; bar statusbar.StatusBar; wantContains string }{
+        {"idle", statusbar.StatusBar{ModelName: "claude-3-5", InputTokens: 1234}, "claude-3-5"},
+        {"busy", statusbar.StatusBar{AgentBusy: true}, "● LIVE"},
+    }
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got := tt.bar.View()
+            if !strings.Contains(got, tt.wantContains) {
+                t.Errorf("got %q, want contains %q", got, tt.wantContains)
+            }
+        })
+    }
+}
+```
+
+Run with:
+```bash
+go test ./internal/tui/components/... -count=1
+```
+
+See `design/20-week-1-tui-component-migration.md` for the Week 1 delivery plan that includes these tests.
 - Template expansion (`$1`, `@file`, `!shell`)
 - Guard evaluation for every command
 - `/commands init` and `/commands list`
@@ -116,3 +151,17 @@ This strategy ensures high confidence in TUI behavior, especially for complex fe
 - **Snapshot**: Custom golden file comparator (or `github.com/sergi/go-diff`)
 - **E2E**: `github.com/ory/dockertest` + subprocess execution
 - **CI**: GitHub Actions with terminal capture
+
+---
+
+## Post-Migration Testing Reality (dcode-001 hygiene)
+
+Component tests (e.g. historyview_test.go, liveregion_test.go, permissionprompt_test.go, statusbar_test.go, inputarea_test.go, toolspinner_test.go, strip_test.go) are table-driven, fast, and cover View() output for different widths/states/stream content without running a full tea.Program.
+
+Integration truth remains the snapshot suite (snapshot_test.go) + model_test.go + builtin_test.go + permission_fuzz_test.go + e2e_test.go. These were kept green with **zero drift** across every dual-state step and every consolidation deletion pass (HistoryView, LiveRegion, Permission + permission.go removal).
+
+When adding a new component or changing rendering:
+1. Add/extend the isolated component _test.go (table-driven View cases).
+2. Run the full snapshot + model tests; if they fail, the change has user-visible impact — investigate before updating goldens.
+
+The dual-state technique (legacy + component fields co-existing) made it possible to update tests incrementally without ever having a broken tree. See design/20 Reality Record for the consolidation sequence.

@@ -19,6 +19,16 @@ import (
 	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
 )
 
+func TestNew_TrimsBaseURL(t *testing.T) {
+	c := client.New("http://example.com/", "token", nil)
+	if c.BaseURL != "http://example.com" {
+		t.Errorf("expected trimmed base url, got %q", c.BaseURL)
+	}
+	if c.HTTP != http.DefaultClient {
+		t.Errorf("expected default client")
+	}
+}
+
 func emptyTarGz(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer
