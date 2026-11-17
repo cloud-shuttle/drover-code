@@ -14,15 +14,15 @@ import (
 
 // RunInput configures one hosted worker contract execution.
 type RunInput struct {
-	WorkDir       string
-	DownloadDir   string
-	Prompt        string
-	InstanceName  string
-	Token         string
-	Metro         string
-	DefaultImage  string
-	ExtraEnv      map[string]string
-	OnStreamLine  func(string)
+	WorkDir      string
+	DownloadDir  string
+	Prompt       string
+	InstanceName string
+	Token        string
+	Metro        string
+	DefaultImage string
+	ExtraEnv     map[string]string
+	OnStreamLine func(string)
 }
 
 // NOTE (Option B - Warden):
@@ -38,6 +38,51 @@ type RunInput struct {
 // This gives semantic safety on tool args + LLM I/O for hosted jobs (earlier/lower-risk gate
 // than the full Muster + Guard ReBAC binding path).
 
+var hostLLMEnvKeys = []string{
+	"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+	"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
+	"SGLANG_API_KEY", "SERVED_MODEL_NAME", "DROVER_LLM_PROVIDER",
+	"GEMINI_API_KEY", "GEMINI_MODEL",
+}
+
+// instanceEnv builds the worker environment. ExtraEnv wins. Host provider keys
+// are copied only when the job did not already supply an LLM credential, so a
+// raw key on the Cloud process cannot replace the Gateway virtual key.
+func instanceEnv(agentToken string, extra map[string]string) map[string]string {
+	env := map[string]string{
+		"AGENT_TOKEN":                   agentToken,
+		"DROVER_CODE_HEADLESS":          "1",
+		"DROVER_CODE_PERMISSION_PRESET": "unikernel",
+	}
+	for k, v := range extra {
+		if strings.TrimSpace(k) != "" && v != "" {
+			env[k] = v
+		}
+	}
+	if jobHasLLM(env) {
+		return env
+	}
+	for _, k := range hostLLMEnvKeys {
+		if _, set := env[k]; set {
+			continue
+		}
+		if v := os.Getenv(k); v != "" {
+			env[k] = v
+		}
+	}
+	return env
+}
+
+func jobHasLLM(env map[string]string) bool {
+	if env["OPENAI_API_KEY"] != "" || env["ANTHROPIC_AUTH_TOKEN"] != "" || env["ANTHROPIC_API_KEY"] != "" || env["SGLANG_API_KEY"] != "" {
+		return true
+	}
+	switch strings.ToLower(env["DROVER_LLM_PROVIDER"]) {
+	case "openai", "openai-compat", "sglang", "anthropic":
+		return true
+	}
+	return false
+}
 
 // RunOutput is the result of a hosted worker contract run.
 type RunOutput struct {
@@ -61,25 +106,7 @@ func Run(ctx context.Context, in RunInput) (RunOutput, error) {
 		name = fmt.Sprintf("drover-hosted-%d", time.Now().Unix())
 	}
 
-	env := map[string]string{
-		"AGENT_TOKEN":                   token,
-		"DROVER_CODE_HEADLESS":          "1",
-		"DROVER_CODE_PERMISSION_PRESET": "unikernel",
-	}
-	for k, v := range in.ExtraEnv {
-		if strings.TrimSpace(k) != "" && v != "" {
-			env[k] = v
-		}
-	}
-	if _, hasLLM := env["ANTHROPIC_AUTH_TOKEN"]; !hasLLM {
-		if _, hasKey := env["ANTHROPIC_API_KEY"]; !hasKey {
-			for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_MODEL", "OPENAI_MODEL", "GEMINI_MODEL"} {
-				if v := os.Getenv(k); v != "" {
-					env[k] = v
-				}
-			}
-		}
-	}
+	env := instanceEnv(token, in.ExtraEnv)
 
 	inst, err := ukc.CreateInstance(ctx, cfg, name, cfg.DefaultImage, 512, env)
 	if err != nil {

@@ -19,6 +19,14 @@ type Event interface {
 
 // TextDeltaEvent carries a streaming text fragment from the model.
 // These arrive rapidly and should be appended to the current output buffer.
+//
+// Remediation #9 note (from streaming quality investigation):
+// Higher-quality output can be achieved with server-side (or agent-loop)
+// sentence / semantic buffering before emitting deltas. This TUI client
+// only ever sees the token stream it is given via TextDeltaEvent.
+// Any such buffering would live in internal/agent (the inference streaming
+// loop in inference.go) or earlier in the gateway/inference layer, not here.
+// Tracked as a complementary future improvement.
 type TextDeltaEvent struct {
 	Text string
 }
@@ -95,8 +103,23 @@ const (
 	PermAppliedManually
 )
 
-func (PermissionRequestEvent) isAgentEvent() {}
+func (PermissionRequestEvent) isAgentEvent()      {}
 func (PermissionBatchRequestEvent) isAgentEvent() {}
+
+// AskUserEvent is emitted by ask_user. The TUI shows Question and sends one
+// reply. OK false means the person dismissed it.
+type AskUserEvent struct {
+	Question string
+	ReplyCh  chan<- AskUserReply
+}
+
+// AskUserReply is the person's answer.
+type AskUserReply struct {
+	Text string
+	OK   bool
+}
+
+func (AskUserEvent) isAgentEvent() {}
 
 // UsageEvent carries token consumption for the last API call.
 // Emitted after each streaming response completes.
@@ -133,10 +156,10 @@ func (CompactionStartEvent) isAgentEvent() {}
 
 // CompactionDoneEvent signals a compaction round finished (check Err).
 type CompactionDoneEvent struct {
-	Round                 int
-	EstimatedTokensAfter  int
-	Duration              time.Duration
-	Err                   error // nil on success
+	Round                int
+	EstimatedTokensAfter int
+	Duration             time.Duration
+	Err                  error // nil on success
 }
 
 func (CompactionDoneEvent) isAgentEvent() {}
@@ -147,6 +170,13 @@ type DoneEvent struct{}
 
 func (DoneEvent) isAgentEvent() {}
 
+// TodoEvent is the current session checklist, replaced as a whole.
+type TodoEvent struct {
+	Text string
+}
+
+func (TodoEvent) isAgentEvent() {}
+
 // ErrorEvent carries a fatal error from the loop.
 // After this event the loop has returned; the consumer should show the error.
 type ErrorEvent struct {
@@ -154,4 +184,3 @@ type ErrorEvent struct {
 }
 
 func (ErrorEvent) isAgentEvent() {}
-

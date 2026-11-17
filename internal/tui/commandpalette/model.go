@@ -1,6 +1,8 @@
 package commandpalette
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -30,6 +32,14 @@ type commandItem struct {
 }
 
 func (i commandItem) Title() string {
+	// For theme picker entries (and other rich actions with spaces or explicit Category),
+	// show the human name without a leading "/" (it is not a slash command to type).
+	if i.category == "Theme" || strings.Contains(i.name, " ") || strings.ContainsAny(i.name, "(:") {
+		if i.shortcut != "" {
+			return i.name + "  " + i.shortcut
+		}
+		return i.name
+	}
 	title := "/" + i.name
 	if i.shortcut != "" {
 		title += "  " + i.shortcut

@@ -26,10 +26,12 @@ patch.go
 scratch_cleanup.go
 Write a python script to calculate the fibonacci sequence
 
-# Common Binaries
+# Common Binaries. drover-* also matches the cmd/drover-code directory
+# name, so re-include that source tree. The built binary still matches.
 server
 drover
 drover-*
+!cmd/drover-code/
 *.exe
 *.test
 .DS_Store

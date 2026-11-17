@@ -8,10 +8,13 @@ import (
 )
 
 func (m *Model) View() string {
+	if m.showingSessions {
+		return m.viewSessions()
+	}
 	if m.showingSearch && m.searchModel != nil {
 		return m.searchModel.View()
 	}
-	
+
 	if m.showingDiff && m.diffModel != nil {
 		return m.diffModel.View()
 	}
@@ -46,9 +49,17 @@ func (m *Model) View() string {
 		sections = append(sections, lipgloss.NewStyle().Foreground(colSubtle).Width(m.width-2).Render(m.compactionBanner))
 	}
 
+	if m.todoList != "" {
+		sections = append(sections, lipgloss.NewStyle().Foreground(colSubtle).Width(m.width-2).Render(m.todoList))
+	}
+
 	// dcode-003: StatusBar component is the source of truth
 	sections = append(sections, m.StatusBar.View())
 
+	if m.askUser != nil {
+		banner := "Question: " + m.askUser.Question + "\nEnter answers. Esc dismisses."
+		sections = append(sections, lipgloss.NewStyle().Foreground(colWarning).Width(m.width-2).Render(banner))
+	}
 
 	// dcode-007: prefer new PermissionPrompt components (old perm* render paths removed as dead code)
 	if m.PermPrompt != nil {
@@ -116,8 +127,6 @@ func (m *Model) viewHome() string {
 	)
 }
 
-
-
 func lastLines(s string, n int) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	if len(lines) <= n {
@@ -140,4 +149,3 @@ func formatTokens(n int) string {
 		return fmt.Sprintf("%.1fm", float64(n)/1_000_000)
 	}
 }
-
