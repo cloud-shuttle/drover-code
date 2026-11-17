@@ -64,7 +64,7 @@ func TestBash_SandboxWriteInsideAndOutside(t *testing.T) {
 	if _, statErr := os.Stat(outsideFile); !os.IsNotExist(statErr) {
 		t.Fatalf("outside write landed: %v\n%s", statErr, out)
 	}
-	if !strings.Contains(out, "Operation not permitted") && !strings.Contains(out, "Read-only file system") && !strings.Contains(out, "Permission denied") {
+	if !sandboxDenied(out) {
 		t.Fatalf("outside write output: %s", out)
 	}
 }
@@ -116,9 +116,28 @@ func TestBash_SandboxNetwork(t *testing.T) {
 	if strings.Contains(out, "exit_code: 0") {
 		t.Fatalf("network succeeded:\n%s", out)
 	}
-	if !strings.Contains(out, "Operation not permitted") && !strings.Contains(out, "Permission denied") {
+	if !sandboxDenied(out) {
 		t.Fatalf("network output: %s", out)
 	}
+}
+
+// sandboxDenied reports a failure that means the jail blocked the command.
+// macOS sandbox-exec says "Operation not permitted". Linux bwrap covers
+// /tmp with a tmpfs, so a host path under /tmp is "No such file or
+// directory", and --unshare-net surfaces "Network is unreachable".
+func sandboxDenied(out string) bool {
+	for _, msg := range []string{
+		"Operation not permitted",
+		"Read-only file system",
+		"Permission denied",
+		"No such file or directory",
+		"Network is unreachable",
+	} {
+		if strings.Contains(out, msg) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBash_SandboxReadsAndGoCache(t *testing.T) {
