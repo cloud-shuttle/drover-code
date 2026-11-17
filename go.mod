@@ -8,7 +8,6 @@ require (
 	github.com/charmbracelet/bubbletea v1.2.4
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/charmbracelet/lipgloss v1.0.0
-	github.com/cloud-shuttle/drover-warden v0.0.0-00010101000000-000000000000
 	github.com/creack/pty v1.1.24
 	github.com/google/go-github/v62 v62.0.0
 	github.com/google/uuid v1.6.0
@@ -23,10 +22,6 @@ require (
 	modernc.org/sqlite v1.34.5
 )
 
-replace github.com/cloud-shuttle/drover-warden => ../drover-warden
-
-replace github.com/cloud-shuttle/drover-libs => ../drover-libs
-
 require (
 	github.com/ClickHouse/ch-go v0.71.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
@@ -38,7 +33,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/x/ansi v0.4.5 // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
-	github.com/cloud-shuttle/drover-libs v0.0.0-00010101000000-000000000000 // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
