@@ -16,6 +16,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.2"
+      - name: Module graph is tidy
+        run: go mod tidy -diff
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
       - name: Test (Unit, Snapshot, and E2E)
         env:
           TERM: xterm-256color
