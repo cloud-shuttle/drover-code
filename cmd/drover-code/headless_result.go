@@ -16,7 +16,7 @@ const headlessResultSchemaVersion = 1
 
 // headlessResultV1 is written to --result-json / DROVER_CODE_RESULT_PATH (design § Phase 4).
 type headlessResultV1 struct {
-	SchemaVersion int `json:"schema_version"`
+	SchemaVersion int    `json:"schema_version"`
 	OK            bool   `json:"ok"`
 	Branch        string `json:"branch,omitempty"`
 	CommitSHA     string `json:"commit_sha,omitempty"`

@@ -17,19 +17,19 @@ func TestPermissionPrompt_View(t *testing.T) {
 		{
 			name: "basic single",
 			prompt: &PermissionPrompt{
-				ToolName:   "bash",
-				Summary:    "Run command",
-				InputJSON:  json.RawMessage(`{"command":"echo hi"}`),
-				Width:      80,
+				ToolName:  "bash",
+				Summary:   "Run command",
+				InputJSON: json.RawMessage(`{"command":"echo hi"}`),
+				Width:     80,
 			},
 			wantContains: []string{"Tool permission required", "bash", "Run command", "command: echo hi", "y ", "a ", "n "},
 		},
 		{
 			name: "narrow",
 			prompt: &PermissionPrompt{
-				ToolName:  "edit",
-				Summary:   "edit file",
-				Width:     30,
+				ToolName: "edit",
+				Summary:  "edit file",
+				Width:    30,
 			},
 			wantContains: []string{"edit", "edit file"},
 		},

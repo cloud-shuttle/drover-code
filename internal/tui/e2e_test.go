@@ -164,7 +164,7 @@ func TestE2E_TypingInteraction(t *testing.T) {
 		// Strip ANSI escape codes to make it easier to match the typed text.
 		ansiRe := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 		cleanOut := ansiRe.ReplaceAllString(out, "")
-		
+
 		if !strings.Contains(cleanOut, "hello pty") {
 			t.Errorf("Expected clean output to contain typed text 'hello pty', got snippet: %q", cleanOut[:min(200, len(cleanOut))])
 		}

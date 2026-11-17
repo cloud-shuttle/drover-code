@@ -87,7 +87,7 @@ func New(cfg Config) *Tracer {
 		return Noop()
 	}
 	t := &Tracer{
-		cfg: cfg,
+		cfg:  cfg,
 		done: make(chan struct{}),
 		client: &http.Client{
 			Timeout: 10 * time.Second,
@@ -151,12 +151,12 @@ func (t *Tracer) EndTrace(traceID TraceID, output any, metadata map[string]any) 
 
 // GenerationParams configures a new generation event.
 type GenerationParams struct {
-	TraceID  TraceID
-	ParentID SpanID // optional: nest inside a span
-	Name     string // e.g. "stream-response-turn-3"
-	Model    string // Anthropic Messages API model id
-	Input    any    // the messages sent to the API
-	System   string // system prompt
+	TraceID   TraceID
+	ParentID  SpanID // optional: nest inside a span
+	Name      string // e.g. "stream-response-turn-3"
+	Model     string // Anthropic Messages API model id
+	Input     any    // the messages sent to the API
+	System    string // system prompt
 	MaxTokens int
 }
 
@@ -169,12 +169,12 @@ func (t *Tracer) StartGeneration(params GenerationParams) SpanID {
 	id := newID()
 	t.enqueue("generation-create", id, map[string]any{
 		"id":                  id,
-		"traceId":           params.TraceID,
+		"traceId":             params.TraceID,
 		"parentObservationId": params.ParentID,
-		"name":              params.Name,
-		"model":             params.Model,
-		"startTime":         time.Now(),
-		"input":             params.Input,
+		"name":                params.Name,
+		"model":               params.Model,
+		"startTime":           time.Now(),
+		"input":               params.Input,
 		"metadata": map[string]any{
 			"systemPromptLen": len(params.System),
 			"maxTokens":       params.MaxTokens,
@@ -235,12 +235,12 @@ func (t *Tracer) StartSpan(params SpanParams) SpanID {
 	id := newID()
 	t.enqueue("span-create", id, map[string]any{
 		"id":                  id,
-		"traceId":           params.TraceID,
+		"traceId":             params.TraceID,
 		"parentObservationId": params.ParentID,
-		"name":              params.Name,
-		"startTime":         time.Now(),
-		"input":             params.Input,
-		"metadata":          params.Metadata,
+		"name":                params.Name,
+		"startTime":           time.Now(),
+		"input":               params.Input,
+		"metadata":            params.Metadata,
 	})
 	return id
 }

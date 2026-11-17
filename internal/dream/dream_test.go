@@ -188,7 +188,7 @@ func TestWorker_Consolidate_Errors(t *testing.T) {
 			api.UserMessage("hello"),
 		},
 	})
-	
+
 	all, _ := store.All()
 	if len(all) != 0 {
 		t.Fatalf("expected no entries due to API error, got %d", len(all))

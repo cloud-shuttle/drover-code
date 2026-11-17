@@ -8,18 +8,18 @@ import (
 
 // Palette defines a set of colors for a specific theme variant.
 type Palette struct {
-	Base       lipgloss.TerminalColor
-	Muted      lipgloss.TerminalColor
-	Subtle     lipgloss.TerminalColor
-	Surface    lipgloss.TerminalColor
-	Border     lipgloss.TerminalColor
-	Accent     lipgloss.TerminalColor
-	AccentDim  lipgloss.TerminalColor
-	Success    lipgloss.TerminalColor
-	Error      lipgloss.TerminalColor
-	Warning    lipgloss.TerminalColor
-	UserBg     lipgloss.TerminalColor
-	UserFg     lipgloss.TerminalColor
+	Base      lipgloss.TerminalColor
+	Muted     lipgloss.TerminalColor
+	Subtle    lipgloss.TerminalColor
+	Surface   lipgloss.TerminalColor
+	Border    lipgloss.TerminalColor
+	Accent    lipgloss.TerminalColor
+	AccentDim lipgloss.TerminalColor
+	Success   lipgloss.TerminalColor
+	Error     lipgloss.TerminalColor
+	Warning   lipgloss.TerminalColor
+	UserBg    lipgloss.TerminalColor
+	UserFg    lipgloss.TerminalColor
 }
 
 // Theme represents a complete visual theme for the TUI.
@@ -85,14 +85,14 @@ var NamedPalettes = map[string]struct {
 	Light Palette
 	Dark  Palette
 }{
-	"default": {Light: DefaultLight, Dark: DefaultDark},
+	"default":       {Light: DefaultLight, Dark: DefaultDark},
 	"high-contrast": {Light: HighContrast, Dark: HighContrast},
 }
 
 // CurrentTheme holds the active theme. Start with a sensible default.
 var CurrentTheme = Theme{
-	Name: "default",
-	Mode: ThemeAuto,
+	Name:    "default",
+	Mode:    ThemeAuto,
 	Palette: DefaultDark, // will be resolved on first use
 }
 
@@ -206,18 +206,18 @@ func applyOverridesToCurrent() {
 
 	// Map of known color names to their setters
 	setters := map[string]*lipgloss.TerminalColor{
-		"base":       &ColBase,
-		"muted":      &ColMuted,
-		"subtle":     &ColSubtle,
-		"surface":    &ColSurface,
-		"border":     &ColBorder,
-		"accent":     &ColAccent,
-		"accentdim":  &ColAccentDim,
-		"success":    &ColSuccess,
-		"error":      &ColError,
-		"warning":    &ColWarning,
-		"userbg":     &ColUserBg,
-		"userfg":     &ColUserFg,
+		"base":      &ColBase,
+		"muted":     &ColMuted,
+		"subtle":    &ColSubtle,
+		"surface":   &ColSurface,
+		"border":    &ColBorder,
+		"accent":    &ColAccent,
+		"accentdim": &ColAccentDim,
+		"success":   &ColSuccess,
+		"error":     &ColError,
+		"warning":   &ColWarning,
+		"userbg":    &ColUserBg,
+		"userfg":    &ColUserFg,
 	}
 
 	for name, hex := range activeColorOverrides {

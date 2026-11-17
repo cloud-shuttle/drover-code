@@ -17,7 +17,7 @@ func TestPersistentHistory_AddAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create history: %v", err)
 	}
-	
+
 	// Default home directory resolution might still put it in ~/.drover,
 	// so we override filePath for testing to ensure isolation.
 	hist.filePath = filepath.Join(tmpDir, "history.json")

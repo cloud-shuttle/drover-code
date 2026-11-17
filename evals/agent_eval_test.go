@@ -395,7 +395,7 @@ func main() {
 				cmdInit := exec.Command("git", "init")
 				cmdInit.Dir = dir
 				_ = cmdInit.Run()
-				
+
 				// Configure local git user to avoid commit errors
 				cmdCfg1 := exec.Command("git", "config", "user.email", "eval@example.com")
 				cmdCfg1.Dir = dir

@@ -33,6 +33,7 @@ func ResetForTest() {
 
 // resetForTest is the internal alias used by this package's own tests.
 func resetForTest() { ResetForTest() }
+
 // Init initializes the global Warden instance from the DROVER_WARDEN_BEADS_DIR
 // environment variable (primary), falling back to shipped default beads for the
 // unikernel preset / dev / packaged runs when the env is unset.

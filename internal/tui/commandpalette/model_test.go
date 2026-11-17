@@ -52,11 +52,11 @@ func TestCommand_IsSemantic(t *testing.T) {
 
 func TestCommandItem_TitleAndDescription(t *testing.T) {
 	tests := []struct {
-		name            string
-		item            commandItem
-		wantTitlePart   string
-		wantDescParts   []string
-		notWantInDesc   []string
+		name          string
+		item          commandItem
+		wantTitlePart string
+		wantDescParts []string
+		notWantInDesc []string
 	}{
 		{
 			name: "simple text command",

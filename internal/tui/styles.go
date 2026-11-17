@@ -142,8 +142,8 @@ var (
 			Bold(true)
 
 	styleHomeWelcome = lipgloss.NewStyle().
-			Foreground(colBase).
-			Bold(true)
+				Foreground(colBase).
+				Bold(true)
 
 	styleHomeMeta = lipgloss.NewStyle().
 			Foreground(colMuted)
@@ -153,7 +153,7 @@ var (
 				Bold(true)
 
 	styleHomeTipsBody = lipgloss.NewStyle().
-			Foreground(colMuted)
+				Foreground(colMuted)
 
 	styleHomeBrand = lipgloss.NewStyle().
 			Foreground(colAccent)
@@ -185,104 +185,104 @@ func rebuildStyles() {
 
 	// Now re-create all styles with (possibly) new color values
 	styleUserLabel = lipgloss.NewStyle().
-			Foreground(colAccent).
-			Bold(true)
+		Foreground(colAccent).
+		Bold(true)
 
 	styleUserBubble = lipgloss.NewStyle().
-			Background(colUserBg).
-			Foreground(colUserFg).
-			PaddingLeft(2).
-			PaddingRight(2).
-			PaddingTop(1).
-			PaddingBottom(1).
-			MarginBottom(1)
+		Background(colUserBg).
+		Foreground(colUserFg).
+		PaddingLeft(2).
+		PaddingRight(2).
+		PaddingTop(1).
+		PaddingBottom(1).
+		MarginBottom(1)
 
 	styleAssistantLabel = lipgloss.NewStyle().
-				Foreground(colMuted)
+		Foreground(colMuted)
 
 	styleAssistantBody = lipgloss.NewStyle().
-				MarginBottom(1)
+		MarginBottom(1)
 
 	styleToolRow = lipgloss.NewStyle().
-			PaddingLeft(2)
+		PaddingLeft(2)
 
 	styleToolName = lipgloss.NewStyle().
-			Foreground(colAccent).
-			Bold(true)
+		Foreground(colAccent).
+		Bold(true)
 
 	styleToolSummary = lipgloss.NewStyle().
-				Foreground(colMuted)
+		Foreground(colMuted)
 
 	styleToolDone = lipgloss.NewStyle().
-			Foreground(colSuccess)
+		Foreground(colSuccess)
 
 	styleToolError = lipgloss.NewStyle().
-			Foreground(colError)
+		Foreground(colError)
 
 	styleToolPending = lipgloss.NewStyle().
-				Foreground(colAccentDim)
+		Foreground(colAccentDim)
 
 	styleLiveRegion = lipgloss.NewStyle().
-			BorderLeft(true).
-			BorderStyle(lipgloss.ThickBorder()).
-			BorderForeground(colAccentDim).
-			PaddingLeft(1).
-			PaddingTop(1).
-			PaddingBottom(1).
-			MarginBottom(1)
+		BorderLeft(true).
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(colAccentDim).
+		PaddingLeft(1).
+		PaddingTop(1).
+		PaddingBottom(1).
+		MarginBottom(1)
 
 	styleInputBorder = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colBorder)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colBorder)
 
 	styleInputBorderFocused = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colAccent)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colAccent)
 
 	styleAutoItem = lipgloss.NewStyle().
-			PaddingLeft(2).
-			Foreground(colMuted)
+		PaddingLeft(2).
+		Foreground(colMuted)
 
 	styleAutoItemSelected = lipgloss.NewStyle().
-				PaddingLeft(2).
-				Foreground(colAccent).
-				Bold(true)
+		PaddingLeft(2).
+		Foreground(colAccent).
+		Bold(true)
 
 	styleError = lipgloss.NewStyle().
-			Foreground(colError).
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(colError).
-			Padding(0, 1).
-			MarginBottom(1)
+		Foreground(colError).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(colError).
+		Padding(0, 1).
+		MarginBottom(1)
 
 	styleDivider = lipgloss.NewStyle().
-			Foreground(colBorder)
+		Foreground(colBorder)
 
 	styleHomeBox = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colBorder).
-			Padding(1, 2)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colBorder).
+		Padding(1, 2)
 
 	styleHomeTitle = lipgloss.NewStyle().
-			Foreground(colMuted).
-			Bold(true)
+		Foreground(colMuted).
+		Bold(true)
 
 	styleHomeWelcome = lipgloss.NewStyle().
-			Foreground(colBase).
-			Bold(true)
+		Foreground(colBase).
+		Bold(true)
 
 	styleHomeMeta = lipgloss.NewStyle().
-			Foreground(colMuted)
+		Foreground(colMuted)
 
 	styleHomeTipsHeader = lipgloss.NewStyle().
-				Foreground(colMuted).
-				Bold(true)
+		Foreground(colMuted).
+		Bold(true)
 
 	styleHomeTipsBody = lipgloss.NewStyle().
-			Foreground(colMuted)
+		Foreground(colMuted)
 
 	styleHomeBrand = lipgloss.NewStyle().
-			Foreground(colAccent)
+		Foreground(colAccent)
 }
 
 func divider(width int) string {
@@ -293,4 +293,3 @@ func divider(width int) string {
 		Width(width).
 		Render("─"))
 }
-

@@ -36,7 +36,7 @@ func (t *Status) Name() string { return "git_status" }
 func (t *Status) Description() string {
 	return "Show the working tree status: modified, staged, untracked, and conflicted files."
 }
-func (t *Status) InputSchema() json.RawMessage { return toolutil.NewSchema("object").Build() }
+func (t *Status) InputSchema() json.RawMessage           { return toolutil.NewSchema("object").Build() }
 func (t *Status) NeedsPermission(_ json.RawMessage) bool { return false }
 func (t *Status) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
 	return runGit(ctx, t.WorkDir, "status", "--short", "--branch")
@@ -411,4 +411,3 @@ func headlessExecution() bool {
 		return false
 	}
 }
-

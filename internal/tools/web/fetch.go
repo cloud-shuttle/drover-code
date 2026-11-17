@@ -176,4 +176,3 @@ func htmlToText(html string) string {
 	}
 	return strings.TrimSpace(result)
 }
-

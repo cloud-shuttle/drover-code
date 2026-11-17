@@ -60,7 +60,7 @@ func TestBuildTemplateTool(t *testing.T) {
 	}
 
 	tool.M = &Manager{}
-	
+
 	// Bad json
 	_, err = tool.Execute(context.Background(), []byte(`{`))
 	if err == nil {

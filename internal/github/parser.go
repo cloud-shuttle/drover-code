@@ -154,4 +154,3 @@ func splitFullName(fullName string) (owner, repo string) {
 func (i *Issue) PullRequest() bool {
 	return strings.Contains(i.HTMLURL, "/pull/")
 }
-

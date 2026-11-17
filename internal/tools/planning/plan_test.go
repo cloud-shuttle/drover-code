@@ -61,7 +61,7 @@ func TestWritePlan_Execute(t *testing.T) {
 	if !strings.Contains(string(b), "# Custom") || !strings.Contains(string(b), "My other plan") {
 		t.Errorf("unexpected file content: %s", string(b))
 	}
-	
+
 	// Test description and schema exist
 	if wp.Description() == "" {
 		t.Error("missing description")

@@ -173,4 +173,3 @@ func TestEngine_WardenParticipates(t *testing.T) {
 		t.Fatalf("read_file should still be allowed: %v err=%v", d, err)
 	}
 }
-

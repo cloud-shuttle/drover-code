@@ -124,12 +124,12 @@ func (l *LiveRegion) View() string {
 // lastLines and SoftenAssistantParagraphBreaks support the live preview pipeline.
 //
 // Remediation #6 (improved):
-// - Uses a look-ahead heuristic so we only insert paragraph breaks for
-//   glued "colon phrases" when there is no evidence of existing paragraph
-//   structure immediately after (i.e. we only soften when it looks like a
-//   complete thought/paragraph is starting).
-// - This makes the transformation more robust than blind ReplaceAll and
-//   avoids mangling text that is already reasonably broken.
+//   - Uses a look-ahead heuristic so we only insert paragraph breaks for
+//     glued "colon phrases" when there is no evidence of existing paragraph
+//     structure immediately after (i.e. we only soften when it looks like a
+//     complete thought/paragraph is starting).
+//   - This makes the transformation more robust than blind ReplaceAll and
+//     avoids mangling text that is already reasonably broken.
 //
 // The same function is used for both the live preview (lightweight) and the
 // final Glamour path so the two are visually consistent.
