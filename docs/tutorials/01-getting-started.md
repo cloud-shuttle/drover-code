@@ -47,7 +47,7 @@ export ANTHROPIC_API_KEY="your-api-key-here"
 ```
 
 > [!TIP]
-> If you are using an Anthropic-compatible provider (like Moonshot or GLM), refer to our [Custom LLM Providers guide](../how-to/configure-custom-providers.md) for setup instructions.
+> If you are using an Anthropic-compatible provider (Moonshot, GLM) or an OpenAI-compatible host (SGLang / DeepSeek-V4-Flash), refer to the [Custom LLM Providers guide](../how-to/configure-custom-providers.md).
 
 ## Step 3: Launch the TUI
 

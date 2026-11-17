@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
+	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
 )
@@ -424,148 +424,77 @@ func TestLoop_ExecutesToolsInParallel(t *testing.T) {
 	}
 }
 
-func TestLoop_ModePlan_BatchAllow(t *testing.T) {
-	var reqCount atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		n := reqCount.Add(1)
-
-		if n == 1 {
-			io.WriteString(w, "event: content_block_start\n")
-			io.WriteString(w, `data: {"index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"needs_perm","input":{}}}`+"\n\n")
-			io.WriteString(w, "event: content_block_stop\n")
-			io.WriteString(w, `data: {"index":0}`+"\n\n")
-			io.WriteString(w, "event: message_stop\n")
-			io.WriteString(w, "data: {}\n\n")
-			return
-		}
-
-		io.WriteString(w, "event: content_block_start\n")
-		io.WriteString(w, `data: {"index":0,"content_block":{"type":"text","text":""}}`+"\n\n")
-		io.WriteString(w, "event: content_block_delta\n")
-		io.WriteString(w, `data: {"index":0,"delta":{"type":"text_delta","text":"done"}}`+"\n\n")
-		io.WriteString(w, "event: content_block_stop\n")
-		io.WriteString(w, `data: {"index":0}`+"\n\n")
-		io.WriteString(w, "event: message_stop\n")
-		io.WriteString(w, "data: {}\n\n")
-	}))
-	defer srv.Close()
-
-	client := api.NewClient("k", "m")
-	client.SetBaseURL(srv.URL)
-
-	mgr := convo.NewManagerWithSystem("sys")
+func TestLoop_ModePlan_RefusesPermissionTools(t *testing.T) {
 	reg := tools.NewRegistry()
-	tool := &needsPermTool{}
-	reg.Register(tool)
+	gated := &needsPermTool{}
+	open := &freeTool{}
+	reg.Register(gated)
+	reg.Register(open)
 
-	events := make(chan Event, 256)
 	eng := permissions.NewEngine(
 		permissions.ModePlan,
-		nil,
+		[]string{"needs_perm"},
 		nil,
 		"",
 		func(context.Context, tools.PermissionRequest) tools.Decision {
-			t.Fatalf("unexpected per-tool prompt in plan mode")
-			return tools.Deny
+			t.Fatal("plan mode prompted")
+			return tools.Allow
 		},
 	)
-	driver := NewAnthropicInferenceDriver(client)
-	executor := NewDefaultToolExecutor(reg, eng, events)
-	loop := NewLoop(driver, mgr, executor, reg, events)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for ev := range events {
-			if br, ok := ev.(PermissionBatchRequestEvent); ok {
-				br.DecisionCh <- PermAllow
+	mgr := convo.NewManagerWithSystem("sys")
+	loop := NewLoop(&planSeqDriver{}, mgr, NewDefaultToolExecutor(reg, eng, nil), reg, nil)
+	if err := loop.Run(context.Background(), "edit it"); err != nil {
+		t.Fatal(err)
+	}
+	if gated.calls.Load() != 0 {
+		t.Fatalf("permission tool ran %d times", gated.calls.Load())
+	}
+	if open.calls.Load() != 1 {
+		t.Fatalf("read tool calls = %d", open.calls.Load())
+	}
+	var saw bool
+	for _, msg := range mgr.Messages() {
+		for _, block := range msg.Content {
+			tr, ok := block.(api.ToolResultBlock)
+			if ok && tr.IsError && strings.Contains(tr.Content, "plan mode refuses needs_perm") {
+				saw = true
 			}
 		}
-	}()
-
-	if err := loop.Run(context.Background(), "go"); err != nil {
-		t.Fatalf("Run error: %v", err)
 	}
-	close(events)
-	wg.Wait()
-
-	if tool.calls.Load() != 1 {
-		t.Fatalf("expected tool to execute once, got %d", tool.calls.Load())
+	if !saw {
+		t.Fatal("missing plan-mode refusal")
 	}
 }
 
-func TestLoop_ModePlan_BatchDeny(t *testing.T) {
-	var reqCount atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		n := reqCount.Add(1)
+type freeTool struct {
+	calls atomic.Int64
+}
 
-		if n == 1 {
-			io.WriteString(w, "event: content_block_start\n")
-			io.WriteString(w, `data: {"index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"needs_perm","input":{}}}`+"\n\n")
-			io.WriteString(w, "event: content_block_stop\n")
-			io.WriteString(w, `data: {"index":0}`+"\n\n")
-			io.WriteString(w, "event: message_stop\n")
-			io.WriteString(w, "data: {}\n\n")
-			return
-		}
+func (t *freeTool) Name() string                         { return "free_tool" }
+func (t *freeTool) Description() string                  { return "read" }
+func (t *freeTool) InputSchema() json.RawMessage         { return json.RawMessage(`{"type":"object"}`) }
+func (t *freeTool) NeedsPermission(json.RawMessage) bool { return false }
+func (t *freeTool) Execute(context.Context, json.RawMessage) (string, error) {
+	t.calls.Add(1)
+	return "read", nil
+}
 
-		io.WriteString(w, "event: content_block_start\n")
-		io.WriteString(w, `data: {"index":0,"content_block":{"type":"text","text":""}}`+"\n\n")
-		io.WriteString(w, "event: content_block_delta\n")
-		io.WriteString(w, `data: {"index":0,"delta":{"type":"text_delta","text":"done"}}`+"\n\n")
-		io.WriteString(w, "event: content_block_stop\n")
-		io.WriteString(w, `data: {"index":0}`+"\n\n")
-		io.WriteString(w, "event: message_stop\n")
-		io.WriteString(w, "data: {}\n\n")
-	}))
-	defer srv.Close()
+type planSeqDriver struct{ n int }
 
-	client := api.NewClient("k", "m")
-	client.SetBaseURL(srv.URL)
+func (d *planSeqDriver) Model() string { return "test" }
 
-	mgr := convo.NewManagerWithSystem("sys")
-	reg := tools.NewRegistry()
-	tool := &needsPermTool{}
-	reg.Register(tool)
-
-	events := make(chan Event, 256)
-	eng := permissions.NewEngine(
-		permissions.ModePlan,
-		nil,
-		nil,
-		"",
-		func(context.Context, tools.PermissionRequest) tools.Decision {
-			t.Fatalf("unexpected per-tool prompt in plan mode")
-			return tools.Deny
-		},
-	)
-	driver := NewAnthropicInferenceDriver(client)
-	executor := NewDefaultToolExecutor(reg, eng, events)
-	loop := NewLoop(driver, mgr, executor, reg, events)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for ev := range events {
-			if br, ok := ev.(PermissionBatchRequestEvent); ok {
-				br.DecisionCh <- PermDeny
-			}
-		}
-	}()
-
-	if err := loop.Run(context.Background(), "go"); err != nil {
-		t.Fatalf("Run error: %v", err)
+func (d *planSeqDriver) Generate(_ context.Context, _ *convo.Manager, _ []api.ToolDefinition) (<-chan SemanticEvent, telemetry.SpanID, error) {
+	d.n++
+	ch := make(chan SemanticEvent, 4)
+	if d.n == 1 {
+		ch <- ToolCallRequested{ID: "a", Name: "needs_perm", Input: json.RawMessage(`{}`)}
+		ch <- ToolCallRequested{ID: "b", Name: "free_tool", Input: json.RawMessage(`{}`)}
+	} else {
+		ch <- TextYielded{Text: "done"}
 	}
-	close(events)
-	wg.Wait()
-
-	if tool.calls.Load() != 0 {
-		t.Fatalf("expected tool not to execute, got %d", tool.calls.Load())
-	}
+	ch <- TurnCompleted{}
+	close(ch)
+	return ch, "", nil
 }
 
 func textStreamResponse(w io.Writer, text string) {
@@ -663,7 +592,7 @@ func TestLoop_AutoCompactionBeforeAgentTurn(t *testing.T) {
 	client := api.NewClient("k", "m")
 	client.SetBaseURL(srv.URL)
 
-// Short turns so that after one compaction (summary + 8 tail) we're under the limit.
+	// Short turns so that after one compaction (summary + 8 tail) we're under the limit.
 	mgr := convo.NewManagerWithSystem(strings.Repeat("s", 500))
 	mgr.SetContextLimit(800)
 	for i := 0; i < 15; i++ {

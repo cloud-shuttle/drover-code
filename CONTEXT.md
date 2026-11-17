@@ -90,6 +90,9 @@ Background process that terminates **worker instances** whose **agent job** ende
 **Execution stream**  
 Server-Sent Events from `GET /exec/{job_id}/stream` on the **worker runtime**—stdout/stderr lines and completion from the headless Drover Code process. Canonical live telemetry for the **worker contract**.
 
+**Session event**  
+A versioned JSONL record of one Drover Code run (`session.started`, status, messages, tool calls, approval requests, artifact writes, `session.linked`). Written beside the run when `DROVER_SESSION_EVENTS` is set. Distinct from the **execution stream** and from a **job event log**. See [`../CONTEXT-MAP.md`](../CONTEXT-MAP.md).
+
 **Progress proxy**  
 **BYOC execution** (v1 contract validation): **execution client** forwards the **execution stream** directly to the CLI with optional reconnect (`Last-Event-ID`). No separate event model required to prove the contract.
 

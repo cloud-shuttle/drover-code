@@ -77,9 +77,9 @@ func (c *Coordinator) Execute(ctx context.Context, task string) (string, error) 
 
 func (c *Coordinator) ExecuteWithResults(ctx context.Context, task string) (ExecuteOutcome, error) {
 	var z ExecuteOutcome
-	
+
 	c.eventCh <- agent.TextDeltaEvent{Text: "Decomposing task into subtasks via Anthropic API...\n"}
-	
+
 	subtasks, err := c.decompose(ctx, task)
 	if err != nil {
 		return z, fmt.Errorf("coordinator: decompose: %w", err)
@@ -330,7 +330,7 @@ func (c *Coordinator) buildCustomToolchain(ctx context.Context) (string, error) 
 
 	defaultImage := mgr.Config().DefaultImage
 	parts := strings.Split(defaultImage, "/")
-	
+
 	var registry, namespace string
 	if len(parts) >= 3 {
 		registry = parts[0]
@@ -382,14 +382,16 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 	token, _ := ukc.RandToken()
 	cfg := mgr.Config()
 	env := map[string]string{
-		"AGENT_TOKEN":                  token,
-		"DROVER_CODE_HEADLESS":         "1",
+		"AGENT_TOKEN":                   token,
+		"DROVER_CODE_HEADLESS":          "1",
 		"DROVER_CODE_PERMISSION_PRESET": "unikernel",
 	}
 	// Forward LLM API keys and configuration to the remote workers
 	for _, k := range []string{
-		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-		"ANTHROPIC_MODEL", "OPENAI_MODEL", "GEMINI_MODEL",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
+		"SGLANG_API_KEY", "SERVED_MODEL_NAME", "DROVER_LLM_PROVIDER",
+		"GEMINI_API_KEY", "GEMINI_MODEL",
 	} {
 		if v := os.Getenv(k); v != "" {
 			env[k] = v
@@ -547,7 +549,7 @@ func (c *Coordinator) synthesise(ctx context.Context, originalTask string, resul
 			fmt.Fprintf(&b, "- **Worker %d** (%s): %s\n", r.Index+1, r.Task, status)
 		}
 		fmt.Fprintf(&b, "\n✨ Parallel tasks complete.\n")
-		
+
 		// Send it to the terminal exactly like the stream does
 		c.eventCh <- agent.TextDeltaEvent{Text: b.String()}
 		return b.String(), nil
@@ -677,7 +679,7 @@ func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, d
 	if err := exec.CommandContext(ctx, "git", "-C", c.workDir, "add", ".").Run(); err != nil {
 		return fmt.Errorf("git add: %v", err)
 	}
-	
+
 	// We check if there's anything to commit first
 	statusCmd := exec.CommandContext(ctx, "git", "-C", c.workDir, "status", "--porcelain")
 	outBytes, _ := statusCmd.Output()
@@ -688,7 +690,7 @@ func (c *Coordinator) syncDownloadedWorkspace(ctx context.Context, st Subtask, d
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to commit changes: %v\n", st.Index+1, err)}
 		} else {
 			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ✅ Workspace committed to branch `%s`\n", st.Index+1, branchName)}
-			
+
 			if c.settings.AcceptCmd != "" {
 				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🔄 Running acceptance criteria: %s\n", st.Index+1, c.settings.AcceptCmd)}
 				acceptCmd := exec.CommandContext(ctx, "/bin/sh", "-c", c.settings.AcceptCmd)

@@ -10,6 +10,14 @@ type agentMsg struct {
 	event agent.Event
 }
 
+// BackgroundBashMsg is a background command starting or finishing.
+// Output is set only when Done is true.
+type BackgroundBashMsg struct {
+	Running int
+	Output  string
+	Done    bool
+}
+
 func waitForEvent(ch <-chan agent.Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
@@ -20,7 +28,10 @@ func waitForEvent(ch <-chan agent.Event) tea.Cmd {
 	}
 }
 
-type agentRunCompleteMsg struct{ err error }
+type agentRunCompleteMsg struct {
+	err error
+	gen int
+}
 
 type compactCompleteMsg struct{ err error }
 
