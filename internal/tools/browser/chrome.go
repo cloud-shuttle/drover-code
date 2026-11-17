@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -48,6 +49,21 @@ func findChrome() (string, error) {
 }
 
 func startChrome(ctx context.Context) (*session, error) {
+	var last error
+	for attempt := 0; attempt < 2; attempt++ {
+		s, err := startChromeOnce(ctx)
+		if err == nil {
+			return s, nil
+		}
+		last = err
+		if ctx.Err() != nil {
+			return nil, err
+		}
+	}
+	return nil, last
+}
+
+func startChromeOnce(ctx context.Context) (*session, error) {
 	bin, err := findChrome()
 	if err != nil {
 		return nil, err
@@ -56,19 +72,28 @@ func startChrome(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("browser: %w", err)
 	}
-	cmd := exec.Command(bin,
+	args := []string{
 		"--headless=new",
 		"--disable-gpu",
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--disable-extensions",
-		"--user-data-dir="+dir,
+		"--disable-dev-shm-usage",
+		"--user-data-dir=" + dir,
 		"--remote-debugging-port=0",
 		"--remote-allow-origins=*",
-		"about:blank",
-	)
+	}
+	// GitHub-hosted runners cannot start Chrome's sandbox. Keep it on for
+	// a normal local session.
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		args = append(args, "--no-sandbox")
+	}
+	args = append(args, "about:blank")
+	cmd := exec.Command(bin, args...)
+	var errTail tailWriter
+	errTail.max = 4096
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &errTail
 	setProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		os.RemoveAll(dir)
@@ -78,6 +103,9 @@ func startChrome(ctx context.Context) (*session, error) {
 	port, err := waitDevToolsPort(ctx, dir)
 	if err != nil {
 		s.Close()
+		if tail := strings.TrimSpace(errTail.String()); tail != "" {
+			err = fmt.Errorf("%w\n%s", err, tail)
+		}
 		return nil, err
 	}
 	pageURL, err := pageSocket(ctx, port)
@@ -125,6 +153,29 @@ func waitDevToolsPort(ctx context.Context, dir string) (string, error) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return "", fmt.Errorf("browser: Chrome did not open a debugging port")
+}
+
+// tailWriter keeps the last max bytes written to it.
+type tailWriter struct {
+	mu  sync.Mutex
+	buf []byte
+	max int
+}
+
+func (w *tailWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	if w.max > 0 && len(w.buf) > w.max {
+		w.buf = append([]byte(nil), w.buf[len(w.buf)-w.max:]...)
+	}
+	return len(p), nil
+}
+
+func (w *tailWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return string(w.buf)
 }
 
 func pageSocket(ctx context.Context, port string) (string, error) {

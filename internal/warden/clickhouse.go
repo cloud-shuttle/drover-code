@@ -5,8 +5,6 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/google/uuid"
-
-	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
 )
 
 // ClickHouseLogger writes Warden decisions to the central drover_decisions / warden_decisions table
@@ -32,7 +30,7 @@ func NewClickHouseLogger(dsn string) (*ClickHouseLogger, error) {
 
 // LogDecision writes a Warden semantic decision to ClickHouse.
 // It is best-effort (errors are logged but do not fail the tool call).
-func (l *ClickHouseLogger) LogDecision(ctx context.Context, checkType string, req *droverwarden.GuardRequest, dec droverwarden.Decision) error {
+func (l *ClickHouseLogger) LogDecision(ctx context.Context, checkType string, req *GuardRequest, dec Decision) error {
 	if l.conn == nil {
 		return nil
 	}
@@ -76,7 +74,7 @@ func (l *ClickHouseLogger) LogDecision(ctx context.Context, checkType string, re
 	)
 }
 
-func getStringFromContext(req *droverwarden.GuardRequest, key string) string {
+func getStringFromContext(req *GuardRequest, key string) string {
 	if req.Context == nil {
 		return ""
 	}
@@ -108,7 +106,7 @@ func InitClickHouseLogger(dsn string) error {
 }
 
 // logToClickHouse is the internal emission point (best effort)
-func logToClickHouse(ctx context.Context, checkType string, req *droverwarden.GuardRequest, dec droverwarden.Decision) {
+func logToClickHouse(ctx context.Context, checkType string, req *GuardRequest, dec Decision) {
 	if chLogger == nil {
 		return
 	}
