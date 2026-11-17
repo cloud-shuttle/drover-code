@@ -47,6 +47,7 @@ type ToolResultBlock struct {
 	ToolUseID string
 	Content   string
 	IsError   bool
+	Images    []ToolImage
 }
 
 func (ToolResultBlock) isContentBlock() {}
@@ -181,4 +182,3 @@ type Usage struct {
 	InputTokens  int
 	OutputTokens int
 }
-

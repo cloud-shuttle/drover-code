@@ -9,6 +9,23 @@ import (
 	"testing"
 )
 
+func TestReadFile_PNGIsPackedImage(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "shot.png")
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}
+	if err := os.WriteFile(p, png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &ReadFile{WorkDir: dir}
+	out, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{"path": "shot.png"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "@@image image/png ") || !strings.Contains(out, "Image shot.png") {
+		t.Fatalf("out %q", out)
+	}
+}
+
 func TestReadFile_BinaryRefused(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "bin.dat")
@@ -110,6 +127,63 @@ func TestEditFile_MultipleMatchesRefused(t *testing.T) {
 	b, _ := os.ReadFile(p)
 	if string(b) != "x\nx\n" {
 		t.Fatalf("file should be unchanged, got %q", string(b))
+	}
+}
+
+func TestWriteFile_GoplsOnGoFile(t *testing.T) {
+	dir := t.TempDir()
+	tool := &WriteFile{WorkDir: dir, Gopls: true}
+	out, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+		"path":    "a.go",
+		"content": "package p\n",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "wrote") || !strings.Contains(out, "\ngopls:") {
+		t.Fatalf("out %q", out)
+	}
+	if !strings.Contains(tool.Description(), "gopls") {
+		t.Fatal("description omits gopls")
+	}
+}
+
+func TestWriteFile_GoplsSkipsOtherFiles(t *testing.T) {
+	dir := t.TempDir()
+	tool := &WriteFile{WorkDir: dir, Gopls: true}
+	out, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+		"path":    "a.txt",
+		"content": "hello",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "gopls") {
+		t.Fatalf("out %q", out)
+	}
+}
+
+func TestEditFile_GoplsAppendsAfterChange(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(p, []byte("package p\n\nfunc f() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &EditFile{WorkDir: dir, Gopls: true}
+	out, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+		"path":       "a.go",
+		"old_string": "func f() {}",
+		"new_string": "func f() { return }",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "gopls:") {
+		t.Fatalf("out %q", out)
+	}
+	plain := &EditFile{WorkDir: dir}
+	if strings.Contains(plain.Description(), "gopls") {
+		t.Fatal("description mentions gopls when disabled")
 	}
 }
 

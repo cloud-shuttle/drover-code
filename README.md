@@ -13,6 +13,7 @@ Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML fro
 
 **How-To Guides (Problem-oriented):**
 - [Configure Custom LLM Providers](docs/how-to/configure-custom-providers.md)
+- [Resume a session](docs/how-to/resume-a-session.md)
 - [Interactive Diffs](docs/how-to/interactive-diffs.md)
 - [Integration Checklist](docs/how-to/integration-checklist.md)
 
@@ -52,8 +53,7 @@ Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML fro
 ## Requirements
 
 - Go 1.22+
-- Anthropic-compatible API access: `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` (see [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md))
-- Optional: `ANTHROPIC_BASE_URL` for non-Anthropic gateways (same doc)
+- LLM API access — Anthropic (`ANTHROPIC_API_KEY`) **or** OpenAI-compatible Chat Completions (`OPENAI_BASE_URL` + `OPENAI_API_KEY` / `SGLANG_API_KEY`). See [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md).
 - `git` on `PATH` if you use git tools
 
 ## Build
@@ -70,6 +70,16 @@ CGO_ENABLED=0 go build -o drover-code ./cmd/drover-code
 export ANTHROPIC_API_KEY=sk-ant-...
 ./drover-code
 ```
+
+Quit and start again in the same directory to continue the last conversation:
+
+```bash
+./drover-code -c
+./drover-code --resume            # pick a session in the TUI
+./drover-code --resume session-18f3
+```
+
+Transcripts are written to `~/.drover/sessions/` after each completed message. `/clear` starts a new session id and leaves the previous file in place. See [Resume a session](docs/how-to/resume-a-session.md).
 
 **Headless** (stdin, non-interactive stdout):
 
@@ -117,9 +127,9 @@ export ANTHROPIC_MODEL=claude-haiku-4-5-20251001
 
 or `"model"` in `~/.claude/settings.json` or `.claude/settings.json`.
 
-## Other LLM providers (Moonshot, GLM, …)
+## Other LLM providers (Moonshot, GLM, SGLang / DeepSeek, …)
 
-drover-code targets the **Anthropic Messages API** wire format. Gateways that implement the same protocol can be used with `ANTHROPIC_BASE_URL` and the provider’s key.
+drover-code speaks **Anthropic Messages** by default, and **OpenAI Chat Completions** when `OPENAI_BASE_URL` or `DROVER_LLM_PROVIDER=openai` is set (self-hosted SGLang, DeepSeek-V4-Flash, etc.).
 
 **Setup, examples, and troubleshooting:** [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md)
 

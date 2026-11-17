@@ -13,7 +13,6 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/warden"
-	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
 )
 
 type ToolExecutor interface {
@@ -34,6 +33,10 @@ func NewDefaultToolExecutor(registry *tools.Registry, perm *permissions.Engine, 
 	}
 }
 
+func planModeRefusal(tool string) string {
+	return fmt.Sprintf("plan mode refuses %s. read_file, list_directory, file_info, glob, grep, explore, and write_plan still run. Shift+Tab leaves plan mode.", tool)
+}
+
 func (e *DefaultToolExecutor) emit(ev Event) {
 	if e.eventCh != nil {
 		e.eventCh <- ev
@@ -48,58 +51,13 @@ func (e *DefaultToolExecutor) ExecuteTools(ctx context.Context, calls []api.Tool
 		decisions[i] = tools.Decision(-1) // unknown
 	}
 	if e.perm != nil && e.perm.Mode() == permissions.ModePlan {
-		var batchIdxs []int
-		var batchItems []PermissionBatchItem
-
 		for i, call := range calls {
-			if !e.registry.NeedsPermission(call.Name, call.Input) {
-				decisions[i] = tools.Allow
+			if e.registry.NeedsPermission(call.Name, call.Input) {
+				// Allow rules do not override plan mode.
+				decisions[i] = tools.Deny
 				continue
 			}
-
-			if d, ok := e.perm.FastDecision(call.Name); ok {
-				decisions[i] = d
-				continue
-			}
-
-			batchIdxs = append(batchIdxs, i)
-			batchItems = append(batchItems, PermissionBatchItem{
-				ToolName: call.Name,
-				Input:    call.Input,
-				Summary:  summariseInput(call.Name, call.Input),
-			})
-		}
-
-		if len(batchItems) > 0 {
-			respCh := make(chan PermissionDecision, 1)
-			select {
-			case e.eventCh <- PermissionBatchRequestEvent{Items: batchItems, DecisionCh: respCh}:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-
-			var d PermissionDecision
-			select {
-			case d = <-respCh:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-
-			switch d {
-			case PermAllow:
-				for _, idx := range batchIdxs {
-					decisions[idx] = tools.Allow
-				}
-			case PermAlwaysAllow:
-				for _, idx := range batchIdxs {
-					decisions[idx] = tools.Allow
-					e.perm.PersistAllow(calls[idx].Name)
-				}
-			default:
-				for _, idx := range batchIdxs {
-					decisions[idx] = tools.Deny
-				}
-			}
+			decisions[i] = tools.Allow
 		}
 	}
 
@@ -127,16 +85,22 @@ func (e *DefaultToolExecutor) ExecuteTools(ctx context.Context, calls []api.Tool
 func (e *DefaultToolExecutor) executeSingleTool(ctx context.Context, idx int, call api.ToolUseBlock, preDecisions []tools.Decision) (api.ToolResultBlock, error) {
 	if idx < len(preDecisions) && preDecisions[idx] != tools.Decision(-1) {
 		if preDecisions[idx] == tools.Deny {
+			content := "Tool execution denied by user."
+			summary := "denied by user"
+			if e.perm != nil && e.perm.Mode() == permissions.ModePlan {
+				content = planModeRefusal(call.Name)
+				summary = "refused by plan mode"
+			}
 			e.emit(ToolDoneEvent{
 				CallIndex:     idx,
 				ID:            call.ID,
 				Name:          call.Name,
 				IsError:       true,
-				OutputSummary: "denied by user",
+				OutputSummary: summary,
 			})
 			return api.ToolResultBlock{
 				ToolUseID: call.ID,
-				Content:   "Tool execution denied by user.",
+				Content:   content,
 				IsError:   true,
 			}, nil
 		}
@@ -208,9 +172,9 @@ exec:
 		Input:    json.RawMessage(call.Input),
 	})
 
-	wdec := warden.CheckAction(ctx, &droverwarden.GuardRequest{
+	wdec := warden.CheckAction(ctx, &warden.GuardRequest{
 		TenantID: os.Getenv("DROVER_TENANT_ID"),
-		ToolCall: &droverwarden.ToolCall{
+		ToolCall: &warden.ToolCall{
 			ToolName: call.Name,
 			Args:     func() map[string]any { var a map[string]any; _ = json.Unmarshal(call.Input, &a); return a }(),
 		},
@@ -263,9 +227,14 @@ exec:
 		OutputSummary: truncate(output, 80),
 	})
 
+	text, images := api.UnpackImages(output)
+	if call.Name == "todo" {
+		e.emit(TodoEvent{Text: text})
+	}
 	return api.ToolResultBlock{
 		ToolUseID: call.ID,
-		Content:   output,
+		Content:   text,
+		Images:    images,
 		IsError:   false,
 	}, nil
 }

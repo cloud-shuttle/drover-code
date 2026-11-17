@@ -31,10 +31,42 @@ func TestGatewayRequestHeadersFromEnv(t *testing.T) {
 	}
 }
 
+func TestApplyGatewayEnv_OpenAI(t *testing.T) {
+	t.Setenv(EnvLLMProvider, "openai")
+	t.Setenv(EnvOpenAIBaseURL, "https://gateway.example/v1")
+	t.Setenv(EnvOpenAIAPIKey, "sk-bf-agent")
+	t.Setenv(EnvGatewayDimAgentJobID, "aj-9")
+	t.Setenv(EnvGatewayDimCustomerID, "cust-9")
+	t.Setenv(EnvAgentCredential, "agent-job-tok")
+	os.Unsetenv(EnvAnthropicBaseURL)
+
+	c := NewClientFromEnv("openai/gpt-4o-mini")
+	if c.Protocol() != ProtocolOpenAI {
+		t.Fatalf("protocol = %q", c.Protocol())
+	}
+	if c.baseURL != "https://gateway.example/v1" {
+		t.Fatalf("baseURL = %q", c.baseURL)
+	}
+	if got := c.extraHeaders["x-bf-vk"]; got != "sk-bf-agent" {
+		t.Fatalf("virtual key header = %q", got)
+	}
+	if got := c.extraHeaders["x-bf-dim-agent-job-id"]; got != "aj-9" {
+		t.Fatalf("agent job id header = %q", got)
+	}
+	if got := c.extraHeaders["x-bf-dim-customer-id"]; got != "cust-9" {
+		t.Fatalf("customer id header = %q", got)
+	}
+	if got := c.extraHeaders["x-drover-agent-credential"]; got != "agent-job-tok" {
+		t.Fatalf("agent credential header = %q", got)
+	}
+}
+
 func TestGatewayRequestHeadersFromEnv_noVKWithoutGatewayBaseURL(t *testing.T) {
 	t.Setenv(EnvGatewayDimAgentJobID, "aj-1")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-bf-test")
 	os.Unsetenv(EnvAnthropicBaseURL)
+	os.Unsetenv(EnvOpenAIBaseURL)
+	os.Unsetenv(EnvLLMProvider)
 
 	if got := GatewayRequestHeadersFromEnv()["x-bf-vk"]; got != "" {
 		t.Fatalf("expected no x-bf-vk without gateway base URL, got %q", got)
@@ -45,6 +77,8 @@ func TestGatewayRequestHeadersFromEnv_empty(t *testing.T) {
 	os.Unsetenv(EnvGatewayDimAgentJobID)
 	os.Unsetenv(EnvGatewayDimCustomerID)
 	os.Unsetenv(EnvAgentCredential)
+	os.Unsetenv(EnvOpenAIBaseURL)
+	os.Unsetenv(EnvAnthropicBaseURL)
 	if len(GatewayRequestHeadersFromEnv()) != 0 {
 		t.Fatal("expected no headers")
 	}

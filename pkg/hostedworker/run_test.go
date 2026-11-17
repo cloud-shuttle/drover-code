@@ -8,6 +8,30 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
 )
 
+func TestInstanceEnv_JobKeyWinsOverHost(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "host-raw-key")
+	t.Setenv("ANTHROPIC_API_KEY", "host-anthropic")
+	env := instanceEnv("tok", map[string]string{
+		"DROVER_LLM_PROVIDER": "openai",
+		"OPENAI_API_KEY":      "sk-bf-virtual",
+		"OPENAI_BASE_URL":     "https://gateway.example/v1",
+	})
+	if env["OPENAI_API_KEY"] != "sk-bf-virtual" {
+		t.Fatalf("key = %q", env["OPENAI_API_KEY"])
+	}
+	if _, ok := env["ANTHROPIC_API_KEY"]; ok {
+		t.Fatal("host anthropic key copied onto an openai job")
+	}
+}
+
+func TestInstanceEnv_CopiesHostWhenJobHasNoLLM(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "host-raw-key")
+	env := instanceEnv("tok", nil)
+	if env["OPENAI_API_KEY"] != "host-raw-key" {
+		t.Fatalf("key = %q", env["OPENAI_API_KEY"])
+	}
+}
+
 func TestRun_NoToken(t *testing.T) {
 	os.Unsetenv("UKC_TOKEN")
 	_, err := Run(context.Background(), RunInput{})

@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/cloudshuttle/drover-code/internal/api"
 )
 
 // envTruthy reports whether an environment variable is set to a common
@@ -48,4 +50,17 @@ func requireAnthropicAPIKey() string {
 	fmt.Fprintln(os.Stderr, "error: set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN")
 	os.Exit(2)
 	return ""
+}
+
+func requireLLMClient(model string) *api.Client {
+	p := api.ProviderFromEnv()
+	if api.APIKeyFromEnv(p) == "" {
+		if p == api.ProtocolOpenAI {
+			fmt.Fprintln(os.Stderr, "error: set OPENAI_API_KEY or SGLANG_API_KEY")
+		} else {
+			fmt.Fprintln(os.Stderr, "error: set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN")
+		}
+		os.Exit(2)
+	}
+	return api.NewClientFromEnv(model)
 }

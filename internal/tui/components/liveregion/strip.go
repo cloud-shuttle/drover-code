@@ -1,8 +1,17 @@
-package tui
+package liveregion
 
 import "strings"
 
-func stripCursorPositionReports(s string) string {
+// The strip* functions perform defensive cleanup of terminal control sequences,
+// OSC responses, bare RGB fragments, and other junk that sometimes leaks into
+// LLM token streams (especially over certain transports or when the model
+// hallucinates terminal output).
+//
+// Remediation #7 context: These now live inside the liveregion package so that
+// the full streaming pipeline (sanitization + buffering + preview) can be
+// encapsulated without the parent model having to know the details.
+
+func StripCursorPositionReports(s string) string {
 	for {
 		changed := false
 		if idx := strings.Index(s, "\x1b["); idx >= 0 {
@@ -21,6 +30,64 @@ func stripCursorPositionReports(s string) string {
 			return s
 		}
 	}
+}
+
+// StripInputCursorReports cleans a whole input buffer. Cursor replies often
+// arrive one byte at a time, so pass the accumulated text, not the latest
+// rune. stored has complete reports removed. shown also drops a trailing
+// reply that is still arriving, so it does not hide every row while the
+// terminal finishes the sequence.
+func StripInputCursorReports(s string) (stored, shown string) {
+	stored = stripCompleteCursorReports(s)
+	shown = stripTrailingCursorPosition(stored)
+	return stored, shown
+}
+
+func stripCompleteCursorReports(s string) string {
+	s = StripCursorPositionReports(s)
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == '[' {
+			if end := scanCSIReportEnd(s, i+1); end > i {
+				i = end
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+func stripTrailingCursorPosition(s string) string {
+	if s == "" {
+		return s
+	}
+	i := len(s) - 1
+	if s[i] == '\\' || s[i] == 0x1b {
+		return s[:i]
+	}
+	for i >= 0 && s[i] >= '0' && s[i] <= '9' {
+		i--
+	}
+	if i >= 0 && s[i] == ';' {
+		i--
+		for i >= 0 && s[i] >= '0' && s[i] <= '9' {
+			i--
+		}
+	}
+	if i < 0 || s[i] != '[' {
+		return s
+	}
+	bracket := i
+	escaped := bracket > 0 && (s[bracket-1] == '\\' || s[bracket-1] == 0x1b)
+	if !escaped && !strings.Contains(s[bracket:], ";") {
+		return s
+	}
+	if escaped {
+		return s[:bracket-1]
+	}
+	return s[:bracket]
 }
 
 func scanCSIReportEnd(s string, start int) int {
@@ -59,16 +126,46 @@ func scanBackslashBracketReportEnd(s string, start int) int {
 	return -1
 }
 
-func stripTerminalOSCResponses(s string) string {
+func StripTerminalOSCResponses(s string) string {
 	for {
+		// Detect common variants of terminal color query responses (OSC 11).
+		// Terminals (and some TUI color probing) reply with things like:
+		//   ]11;rgb:RRRR/GGGG/BBBB
+		//   ]11rgb:RRRR/GGGG/BBBB
+		// These can arrive split across reads and leak into the focused textarea
+		// on startup, producing garbage like the "]11rgb:2828/..." the user saw.
 		i := strings.Index(s, "]11;rgb:")
+		if i < 0 {
+			i = strings.Index(s, "]11rgb:")
+		}
+		if i < 0 {
+			i = strings.Index(s, "11;rgb:")
+		}
+		if i < 0 {
+			i = strings.Index(s, "11rgb:")
+		}
+		if i < 0 {
+			i = strings.Index(s, "11;rg")
+		}
+		if i < 0 {
+			i = strings.Index(s, "11rg")
+		}
+
 		if i < 0 {
 			return s
 		}
-		j := i + len("]11;rgb:")
+
+		// If we landed on a fragment, try to include a preceding ']' if present.
+		start := i
+		if s[start] == '1' && start > 0 && s[start-1] == ']' {
+			start--
+		}
+
+		// Consume until a plausible OSC terminator or whitespace.
+		j := start + 1
 		for j < len(s) {
 			switch s[j] {
-			case '\a', 0x1b, '\\', '\n', '\r':
+			case '\a', 0x1b, '\\', '\n', '\r', ' ':
 				if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' {
 					j += 2
 				} else {
@@ -83,11 +180,11 @@ func stripTerminalOSCResponses(s string) string {
 		if j > len(s) {
 			j = len(s)
 		}
-		s = s[:i] + s[j:]
+		s = s[:start] + s[j:]
 	}
 }
 
-func stripStandaloneBackslashLines(s string) string {
+func StripStandaloneBackslashLines(s string) string {
 	for {
 		orig := s
 		s = strings.TrimPrefix(s, "\\\n")
@@ -99,7 +196,7 @@ func stripStandaloneBackslashLines(s string) string {
 	}
 }
 
-func stripBareRGBTriplets(s string) string {
+func StripBareRGBTriplets(s string) string {
 	return stripBareNumericSlashFragments(s)
 }
 

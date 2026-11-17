@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/cloudshuttle/drover-code/internal/tools/gopls"
 	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
@@ -15,6 +16,8 @@ import (
 // EditFile makes a targeted string-replacement in a file.
 type EditFile struct {
 	WorkDir string
+	// Gopls appends diagnostics for a .go file. Local sessions set this.
+	Gopls bool
 }
 
 type editFileInput struct {
@@ -26,10 +29,14 @@ type editFileInput struct {
 
 func (t *EditFile) Name() string { return "edit_file" }
 func (t *EditFile) Description() string {
-	return "Make a targeted replacement in a file. Supports two modes:\n" +
+	desc := "Make a targeted replacement in a file. Supports two modes:\n" +
 		"1. String replacement: replace old_string with new_string. The tool uses fuzzy whitespace normalisation when searching.\n" +
 		"2. Unified diff patch: provide a unified diff in the 'diff' field.\n" +
 		"Returns a unified diff of the actual change made."
+	if t.Gopls {
+		desc += " On a .go file, the result includes gopls errors and warnings for that file."
+	}
+	return desc
 }
 
 func (t *EditFile) InputSchema() json.RawMessage {
@@ -44,7 +51,7 @@ func (t *EditFile) InputSchema() json.RawMessage {
 
 func (t *EditFile) NeedsPermission(_ json.RawMessage) bool { return true }
 
-func (t *EditFile) Execute(_ context.Context, rawInput json.RawMessage) (string, error) {
+func (t *EditFile) Execute(ctx context.Context, rawInput json.RawMessage) (string, error) {
 	var inp editFileInput
 	if err := json.Unmarshal(rawInput, &inp); err != nil {
 		return "", fmt.Errorf("edit_file: bad input: %w", err)
@@ -70,7 +77,7 @@ func (t *EditFile) Execute(_ context.Context, rawInput json.RawMessage) (string,
 		if original == updated {
 			return "No changes made (patch did not apply cleanly)", nil
 		}
-		return t.applyAndDiff(absPath, inp.Path, original, updated)
+		return t.applyAndDiff(ctx, absPath, inp.Path, original, updated)
 	}
 
 	// --- mode: string replacement ---
@@ -85,7 +92,7 @@ func (t *EditFile) Execute(_ context.Context, rawInput json.RawMessage) (string,
 	count := strings.Count(original, inp.OldString)
 	if count == 1 {
 		updated := strings.Replace(original, inp.OldString, inp.NewString, 1)
-		return t.applyAndDiff(absPath, inp.Path, original, updated)
+		return t.applyAndDiff(ctx, absPath, inp.Path, original, updated)
 	}
 	if count > 1 {
 		return "", fmt.Errorf("edit_file: old_string matches %d locations in %s — make it more specific by including surrounding lines", count, inp.Path)
@@ -108,7 +115,7 @@ func (t *EditFile) Execute(_ context.Context, rawInput json.RawMessage) (string,
 		return "", fmt.Errorf("edit_file: fuzzy replacement failed unexpectedly in %s", inp.Path)
 	}
 
-	return t.applyAndDiff(absPath, inp.Path, original, updated)
+	return t.applyAndDiff(ctx, absPath, inp.Path, original, updated)
 }
 
 // PreviewEdit simulates the edit and returns the file path and unified diff without writing.
@@ -151,7 +158,7 @@ func PreviewEdit(workDir string, rawInput json.RawMessage) (string, string, erro
 		updated := strings.Replace(original, inp.OldString, inp.NewString, 1)
 		return inp.Path, unifiedDiff(inp.Path, original, updated), nil
 	}
-	
+
 	normFile := normaliseWS(original)
 	normOld := normaliseWS(inp.OldString)
 
@@ -171,7 +178,7 @@ func PreviewEdit(workDir string, rawInput json.RawMessage) (string, string, erro
 	return inp.Path, unifiedDiff(inp.Path, original, updated), nil
 }
 
-func (t *EditFile) applyAndDiff(absPath, displayPath, original, updated string) (string, error) {
+func (t *EditFile) applyAndDiff(ctx context.Context, absPath, displayPath, original, updated string) (string, error) {
 	perm := os.FileMode(0o644)
 	if info, err := os.Stat(absPath); err == nil {
 		perm = info.Mode().Perm()
@@ -179,7 +186,11 @@ func (t *EditFile) applyAndDiff(absPath, displayPath, original, updated string) 
 	if err := toolutil.WriteAtomic(absPath, []byte(updated), perm); err != nil {
 		return "", fmt.Errorf("edit_file: write: %w", err)
 	}
-	return unifiedDiff(displayPath, original, updated), nil
+	diff := unifiedDiff(displayPath, original, updated)
+	if t.Gopls {
+		diff += gopls.Annotate(ctx, displayPath, absPath)
+	}
+	return diff, nil
 }
 
 func normaliseWS(s string) string {
@@ -318,4 +329,3 @@ func applyUnifiedDiff(original, diff string) (string, error) {
 	patched, _ := dmp.PatchApply(patches, original)
 	return patched, nil
 }
-
