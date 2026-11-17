@@ -492,8 +492,9 @@ func TestModel_PauseResumeCommands(t *testing.T) {
 		t.Errorf("expected lastPauseReason 'runaway tool', got %q", m.lastPauseReason)
 	}
 
-	// Simulate the completion message as the real flow does on Canceled
-	next, _ := m.Update(agentMsg{event: agent.ErrorEvent{Err: context.Canceled}})
+	// The runner reports a canceled run as agentRunCompleteMsg. ErrorEvent
+	// keeps the raw error text and does not write the pause history turn.
+	next, _ := m.Update(agentRunCompleteMsg{err: context.Canceled})
 	m2 := next.(*Model)
 	if !strings.Contains(m2.lastError, "paused") {
 		t.Errorf("expected paused error, got %q", m2.lastError)
@@ -605,8 +606,9 @@ func TestModel_FullPauseResumeDuringRealToolRun(t *testing.T) {
 		t.Error("InputArea should show paused banner with reason")
 	}
 
-	// 3. Simulate the pause completing (agent run returns with Canceled)
-	next, _ = m.Update(agentMsg{event: agent.ErrorEvent{Err: context.Canceled}})
+	// 3. The runner reports the canceled run. This leaves the in-progress
+	// tool in place; ErrorEvent would wipe it and discard the streamed text.
+	next, _ = m.Update(agentRunCompleteMsg{err: context.Canceled})
 	m = next.(*Model)
 
 	// History should have the pause note with reason (we injected it above to match real flow)
@@ -648,24 +650,23 @@ func TestModel_FullPauseResumeDuringRealToolRun(t *testing.T) {
 	}})
 	m = next.(*Model)
 
-	// Simulate what the real DoneEvent handler does (drains Live.CompletedTools)
-	if m.Live != nil {
-		m.Live.CompletedTools = append(m.Live.CompletedTools, core.CompletedTool{
-			Name:    "bash",
-			Summary: "done after resume",
-			IsError: false,
-		})
-	}
-
 	next, _ = m.Update(agentMsg{event: agent.DoneEvent{}})
 	m = next.(*Model)
 
-	// Final verification: tool result from the interrupted+resumed run is recorded, agent is idle
+	// DoneEvent moves completed tools onto the assistant history turn.
 	if m.agentBusy {
 		t.Error("expected agent idle after resumed tool run completed")
 	}
-	if m.Live == nil || len(m.Live.CompletedTools) == 0 || m.Live.CompletedTools[len(m.Live.CompletedTools)-1].Summary != "done after resume" {
-		t.Error("expected the tool from the paused+resumed run to be recorded (in real flow it ends up in final history)")
+	recorded := false
+	for _, turn := range m.HistoryView.GetTurns() {
+		for _, tool := range turn.Tools {
+			if tool.Name == "bash" && tool.Summary == "done after resume" && !tool.IsError {
+				recorded = true
+			}
+		}
+	}
+	if !recorded {
+		t.Error("expected the tool from the paused+resumed run to be recorded")
 	}
 }
 
