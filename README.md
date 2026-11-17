@@ -2,9 +2,9 @@
 
 ![Status: active](https://img.shields.io/badge/status-active-2ea44f)
 
-> **Status, checked 18 Nov 2026: ACTIVE.** Coding-agent engine and UKC worker runtime. Last code change 11 Nov 2026 (local session harness).
+> **Status, checked 18 Nov 2026: ACTIVE.** Coding-agent engine and UKC worker runtime. Last code change 17 Nov 2026 (bead file evaluation moved in from drover-warden).
 >
-> **Clean-clone check:** **main does not build from a clean clone:** `go build ./...` stops with "updates to go.mod needed" until `go mod tidy` runs (tracked as an M0 issue). It also expects sibling `drover-warden` and `drover-libs` checkouts.
+> **Clean-clone check:** `go build ./...`, `go vet ./...` and `go test -race ./...` pass from a fresh clone of `main` (`9c069be`). No sibling checkouts are needed since 44a199a removed the `drover-warden` and `drover-libs` `replace` lines (#19).
 >
 > **Roadmap:** [ROADMAP.md](ROADMAP.md). Program tracking: Drover gap program (M0 to M4).
 
@@ -61,7 +61,6 @@ Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML fro
 ## Requirements
 
 - Go 1.26 (see `go.mod`)
-- Sibling checkouts of `drover-warden` and `drover-libs` (go.mod uses `replace ../drover-warden` and `replace ../drover-libs`)
 - LLM API access — Anthropic (`ANTHROPIC_API_KEY`) **or** OpenAI-compatible Chat Completions (`OPENAI_BASE_URL` + `OPENAI_API_KEY` / `SGLANG_API_KEY`). See [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md).
 - `git` on `PATH` if you use git tools
 
