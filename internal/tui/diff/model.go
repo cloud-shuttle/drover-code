@@ -10,16 +10,16 @@ import (
 )
 
 var (
-	titleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	fileStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	titleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	fileStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
 	hunkHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Bold(true)
-	selectedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
-	acceptedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
-	rejectedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	addedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
-	removedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	contextStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	helpStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	selectedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
+	acceptedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	rejectedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	addedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	removedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	contextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	helpStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
 type Model struct {

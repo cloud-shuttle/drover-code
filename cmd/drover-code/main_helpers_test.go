@@ -104,14 +104,14 @@ func TestWantsHeadlessMode_envAndFlags(t *testing.T) {
 func TestResolveUndercoverMode(t *testing.T) {
 	bTrue := true
 	bFalse := false
-	
+
 	if !resolveUndercoverMode(config.Settings{UndercoverMode: &bTrue}, "") {
 		t.Fatal("expected true when settings.UndercoverMode is true")
 	}
 	if resolveUndercoverMode(config.Settings{UndercoverMode: &bFalse}, "") {
 		t.Fatal("expected false when settings.UndercoverMode is false")
 	}
-	
+
 	// When nil, it should fallback to detection. We can test detection loosely.
 	// An empty dir won't have .cline rules.
 	if resolveUndercoverMode(config.Settings{}, t.TempDir()) {
@@ -124,7 +124,7 @@ func TestHeadlessUseJSONL(t *testing.T) {
 	if headlessUseJSONL() {
 		t.Fatal("expected false when HEADLESS_PLAIN is 1")
 	}
-	
+
 	t.Setenv("DROVER_CODE_HEADLESS_PLAIN", "")
 	t.Setenv("DROVER_CODE_JSONL", "1")
 	if !headlessUseJSONL() {
@@ -207,7 +207,7 @@ func TestPrintEvents(t *testing.T) {
 	ch <- agent.CompactionDoneEvent{Round: 1, EstimatedTokensAfter: 50, Err: nil}
 	ch <- agent.CompactionDoneEvent{Round: 2, Err: errors.New("fail")}
 	close(ch)
-	
+
 	printEvents(ch)
 	// Since this prints to stdout/stderr, we just ensure it doesn't panic.
 }

@@ -14,8 +14,6 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/workspace"
 )
 
-
-
 // UploadWorkspace streams a tar.gz of the local directory to the UKC agent's /workspace endpoint.
 func UploadWorkspace(ctx context.Context, cfg Config, inst Instance, localDir string, agentToken string) error {
 	return UploadWorkspaceWithLimits(ctx, cfg, inst, localDir, agentToken, workspace.DefaultWorkspaceLimits())

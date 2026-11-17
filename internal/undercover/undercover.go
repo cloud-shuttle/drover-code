@@ -74,4 +74,3 @@ func isInternalDomain(url string) bool {
 	}
 	return false
 }
-

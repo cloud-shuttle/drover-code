@@ -57,7 +57,7 @@ func TestInitCommands(t *testing.T) {
 	os.Stdout = oldStdout2
 	var buf2 bytes.Buffer
 	io.Copy(&buf2, r2)
-	
+
 	output2 := buf2.String()
 	if !strings.Contains(output2, "All default commands already exist.") {
 		t.Errorf("expected already exists message, got: %s", output2)

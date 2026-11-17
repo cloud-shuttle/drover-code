@@ -85,11 +85,11 @@ type DiffComment struct {
 }
 
 type IssueCommentEvent struct {
-	Action     string     `json:"action"`
-	Comment    Comment    `json:"comment"`
-	Issue      Issue      `json:"issue"`
-	Repository Repository `json:"repository"`
-	Sender     User       `json:"sender"`
+	Action      string       `json:"action"`
+	Comment     Comment      `json:"comment"`
+	Issue       Issue        `json:"issue"`
+	Repository  Repository   `json:"repository"`
+	Sender      User         `json:"sender"`
 	PullRequest *PullRequest `json:"pull_request,omitempty"`
 }
 
@@ -152,4 +152,3 @@ type ParsedEvent struct {
 	Trigger *Trigger
 	Raw     json.RawMessage
 }
-

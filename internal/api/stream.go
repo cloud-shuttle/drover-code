@@ -255,4 +255,3 @@ func parseEvent(eventType, data string) (StreamEvent, error) {
 		return nil, nil // forward-compatible: ignore unknown event types
 	}
 }
-

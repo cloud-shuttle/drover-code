@@ -165,4 +165,3 @@ func (t *FileInfo) Execute(_ context.Context, rawInput json.RawMessage) (string,
 		extra,
 	), nil
 }
-

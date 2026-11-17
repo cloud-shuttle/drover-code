@@ -82,4 +82,3 @@ func TestClient_StreamMessage_HeadersAndBodyShape(t *testing.T) {
 		t.Fatalf("expected messages in request body")
 	}
 }
-

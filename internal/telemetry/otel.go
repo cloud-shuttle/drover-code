@@ -5,8 +5,8 @@ package telemetry
 
 import (
 	"context"
-	"os"
 	stdlog "log"
+	"os"
 	"strings"
 
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"

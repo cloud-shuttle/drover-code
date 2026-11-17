@@ -302,4 +302,3 @@ func extractTags(summary string) []string {
 	}
 	return tags
 }
-

@@ -158,4 +158,3 @@ func splitPath(p string) []string {
 	}
 	return strings.Split(p, string(filepath.Separator))
 }
-

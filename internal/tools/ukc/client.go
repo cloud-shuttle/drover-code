@@ -97,11 +97,11 @@ func (c *Client) DownloadWorkspace(ctx context.Context, destDir string) error {
 
 // ContractSpec describes one worker-contract execution (upload → exec → download).
 type ContractSpec struct {
-	WorkDir      string
-	DownloadDir  string
-	Command      string
-	Limits       workspace.WorkspaceLimits
-	OnStreamLine func(string)
+	WorkDir       string
+	DownloadDir   string
+	Command       string
+	Limits        workspace.WorkspaceLimits
+	OnStreamLine  func(string)
 	MaxHealthWait time.Duration
 }
 
