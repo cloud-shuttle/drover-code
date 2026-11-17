@@ -13,15 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout sibling modules
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # go.mod replaces these with ../ siblings. They are private repos in
-          # the same org; the job token must be able to read them.
-          gh repo clone cloud-shuttle/drover-warden ../drover-warden -- --depth=1
-          gh repo clone cloud-shuttle/drover-libs ../drover-libs -- --depth=1
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.2"
@@ -71,13 +62,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout sibling modules
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh repo clone cloud-shuttle/drover-warden ../drover-warden -- --depth=1
-          gh repo clone cloud-shuttle/drover-libs ../drover-libs -- --depth=1
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.2"
