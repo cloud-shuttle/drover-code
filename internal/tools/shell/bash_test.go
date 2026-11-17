@@ -103,6 +103,12 @@ func TestBash_BackgroundReturnsBeforeExit(t *testing.T) {
 	if finished.ID != "b1" || !strings.Contains(finished.Output, "exit_code: 0") || !strings.Contains(finished.Output, "ok") {
 		t.Fatalf("notice: %+v", finished)
 	}
+	// The completion notice is delivered while the job is still counted.
+	// Running() drops just after the callback returns.
+	idle := time.Now().Add(2 * time.Second)
+	for b.Running() != 0 && time.Now().Before(idle) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if b.Running() != 0 {
 		t.Fatalf("running = %d", b.Running())
 	}

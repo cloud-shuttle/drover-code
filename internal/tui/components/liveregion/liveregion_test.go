@@ -177,9 +177,10 @@ func TestLiveRegion_Throttle_RateLimitsVisibleUpdates(t *testing.T) {
 
 	startVisibleLen := len(lr.preview.visible)
 
-	// Force the last promotion time far in the future so the time-based throttle
-	// can never fire during this tiny burst, making the test fully deterministic
-	// regardless of how long the test takes to execute on any machine.
+	// The first 2.5s of a response promote pending text immediately. Age the
+	// turn out of that window, then hold the last promotion in the future so
+	// the time throttle cannot fire during this burst.
+	lr.preview.responseStart = time.Now().Add(-3 * time.Second)
 	lr.preview.lastVisibleCommit = time.Now().Add(10 * time.Hour)
 
 	// Now do a burst of tiny non-boundary appends whose total growth is well

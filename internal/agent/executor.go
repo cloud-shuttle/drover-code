@@ -8,7 +8,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
@@ -173,9 +172,9 @@ exec:
 		Input:    json.RawMessage(call.Input),
 	})
 
-	wdec := warden.CheckAction(ctx, &droverwarden.GuardRequest{
+	wdec := warden.CheckAction(ctx, &warden.GuardRequest{
 		TenantID: os.Getenv("DROVER_TENANT_ID"),
-		ToolCall: &droverwarden.ToolCall{
+		ToolCall: &warden.ToolCall{
 			ToolName: call.Name,
 			Args:     func() map[string]any { var a map[string]any; _ = json.Unmarshal(call.Input, &a); return a }(),
 		},

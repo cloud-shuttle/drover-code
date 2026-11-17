@@ -22,10 +22,17 @@ func TestSandboxEnvDropsHostSockets(t *testing.T) {
 func TestLinuxSandboxArgsHidesHostSockets(t *testing.T) {
 	args := linuxSandboxArgs("/work", "/work", "/private/tmp/drover", "true")
 	joined := strings.Join(args, "\n")
-	for _, dir := range []string{"/tmp", "/run", "/var/run"} {
+	dirs := []string{"/tmp", "/run"}
+	if !varRunFollowsRun() {
+		dirs = append(dirs, "/var/run")
+	}
+	for _, dir := range dirs {
 		if !strings.Contains(joined, "--tmpfs\n"+dir) {
 			t.Fatalf("missing tmpfs %s\n%s", dir, joined)
 		}
+	}
+	if varRunFollowsRun() && strings.Contains(joined, "--tmpfs\n/var/run") {
+		t.Fatalf("/var/run is a symlink to /run; a tmpfs there makes bwrap fail\n%s", joined)
 	}
 	tmpfsAt := strings.Index(joined, "--tmpfs")
 	bindAt := strings.Index(joined, "--bind")
