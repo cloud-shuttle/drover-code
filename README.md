@@ -1,12 +1,20 @@
 # Drover Code
 
-> Part of the [Drover Ecosystem](../DROVER_ECOSYSTEM.md) — Orchestrating Autonomous Agentic Engineering
+![Status: active](https://img.shields.io/badge/status-active-2ea44f)
+
+> **Status, checked 18 Nov 2026: ACTIVE.** Coding-agent engine and UKC worker runtime. Last code change 11 Nov 2026 (local session harness).
+>
+> **Clean-clone check:** **main does not build from a clean clone:** `go build ./...` stops with "updates to go.mod needed" until `go mod tidy` runs (tracked as an M0 issue). It also expects sibling `drover-warden` and `drover-libs` checkouts.
+>
+> **Roadmap:** [ROADMAP.md](ROADMAP.md). Program tracking: Drover gap program (M0 to M4).
+
+> Part of the [Drover Ecosystem](https://github.com/cloud-shuttle/drover-sh/blob/main/docs/reference/cross-repo-map.md) — Orchestrating Autonomous Agentic Engineering
 
 A single static Go binary that runs an agentic coding assistant against the Anthropic Messages API (streaming, tools, Bubble Tea TUI). No Node or Bun.
 
 ## Documentation Index
 
-Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML frontmatter per the org [content taxonomy](../docs/taxonomy.yaml). Validate with [`scripts/validate-content-frontmatter.sh`](scripts/validate-content-frontmatter.sh).
+Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML frontmatter per the org [content taxonomy](taxonomy/taxonomy.yaml). Validate with [`scripts/validate-content-frontmatter.sh`](scripts/validate-content-frontmatter.sh).
 
 **Tutorials (Learning-oriented):**
 - [Getting Started](docs/tutorials/01-getting-started.md)
@@ -22,7 +30,7 @@ Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML fro
 - [Available Tools](docs/reference/available-tools.md)
 - [Implementation Requirements](docs/reference/implementation-reqs.md)
 - [Requirements Index](docs/reference/requirements-index.md)
-- [Requirements Summary](docs/reference/requirements-summary.txt)
+- Requirements Summary (file not in repo)
 - [Interaction Guidelines](docs/reference/interaction-guidelines.md)
 
 **Explanation (Understanding-oriented):**
@@ -52,7 +60,8 @@ Docs under `docs/` follow [Diátaxis](https://diataxis.fr/) and require YAML fro
 
 ## Requirements
 
-- Go 1.22+
+- Go 1.26 (see `go.mod`)
+- Sibling checkouts of `drover-warden` and `drover-libs` (go.mod uses `replace ../drover-warden` and `replace ../drover-libs`)
 - LLM API access — Anthropic (`ANTHROPIC_API_KEY`) **or** OpenAI-compatible Chat Completions (`OPENAI_BASE_URL` + `OPENAI_API_KEY` / `SGLANG_API_KEY`). See [docs/how-to/configure-custom-providers.md](docs/how-to/configure-custom-providers.md).
 - `git` on `PATH` if you use git tools
 
