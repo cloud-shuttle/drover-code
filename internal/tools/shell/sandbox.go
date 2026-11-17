@@ -130,11 +130,18 @@ func sandboxDropEnv(name string) bool {
 // linuxSandboxArgs is the bwrap command line. Host runtime sockets under
 // /tmp, /run, and /var/run are covered before the project and temp binds.
 func linuxSandboxArgs(root, cwd, temp, command string) []string {
-	return []string{
+	args := []string{
 		"--ro-bind", "/", "/",
 		"--tmpfs", "/tmp",
 		"--tmpfs", "/run",
-		"--tmpfs", "/var/run",
+	}
+	// Ubuntu /var/run is a symlink to /run. bwrap refuses to mount a tmpfs
+	// on that symlink ("Can't mount tmpfs on /newroot/var/run"). The /run
+	// tmpfs already covers the symlink target.
+	if !varRunFollowsRun() {
+		args = append(args, "--tmpfs", "/var/run")
+	}
+	args = append(args,
 		"--bind", root, root,
 		"--bind", temp, temp,
 		"--dev", "/dev",
@@ -144,5 +151,25 @@ func linuxSandboxArgs(root, cwd, temp, command string) []string {
 		"--chdir", cwd,
 		"--",
 		"bash", "-c", command,
+	)
+	return args
+}
+
+// varRunFollowsRun reports whether /var/run is a symlink to /run. A separate
+// tmpfs is then unnecessary and, on current bubblewrap, impossible.
+func varRunFollowsRun() bool {
+	fi, err := os.Lstat("/var/run")
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	target, err := os.Readlink("/var/run")
+	if err != nil {
+		return false
+	}
+	switch target {
+	case "/run", "../run", "run":
+		return true
+	default:
+		return false
 	}
 }

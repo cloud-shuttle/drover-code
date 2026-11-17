@@ -23,7 +23,8 @@ func TestGitHeadSHA(t *testing.T) {
 		t.Skipf("git not available or init failed: %v", err)
 	}
 
-	// Create commit
+	// Create commit. The runner has no global git identity, so the author
+	// has to be set on the command or commit exits 128 and HEAD is missing.
 	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0o644)
 	if out, err := exec.Command("git", "-C", dir, "add", "test.txt").CombinedOutput(); err != nil {
 		t.Fatalf("git add: %v: %s", err, out)
