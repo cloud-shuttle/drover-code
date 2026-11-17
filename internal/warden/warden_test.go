@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
 )
 
 func TestWardenWrapper_DisabledReturnsAllow(t *testing.T) {
@@ -20,8 +18,8 @@ func TestWardenWrapper_DisabledReturnsAllow(t *testing.T) {
 		t.Fatal("expected nil Warden when disabled")
 	}
 
-	dec := CheckAction(context.Background(), &droverwarden.GuardRequest{
-		ToolCall: &droverwarden.ToolCall{ToolName: "bash"},
+	dec := CheckAction(context.Background(), &GuardRequest{
+		ToolCall: &ToolCall{ToolName: "bash"},
 	})
 	if !dec.Allowed {
 		t.Fatalf("disabled CheckAction should allow, got: %+v", dec)
@@ -31,12 +29,12 @@ func TestWardenWrapper_DisabledReturnsAllow(t *testing.T) {
 	}
 
 	// Also exercise the new helpers
-	decI := CheckInput(context.Background(), &droverwarden.GuardRequest{Input: "test prompt"})
+	decI := CheckInput(context.Background(), &GuardRequest{Input: "test prompt"})
 	if !decI.Allowed {
 		t.Fatal("CheckInput disabled should allow")
 	}
 
-	decO := CheckOutput(context.Background(), &droverwarden.GuardRequest{Output: "some output"})
+	decO := CheckOutput(context.Background(), &GuardRequest{Output: "some output"})
 	if !decO.Allowed {
 		t.Fatal("CheckOutput disabled should allow")
 	}
@@ -74,9 +72,9 @@ func TestWardenWrapper_ActiveWithTempBeads_BlocksOnPolicy(t *testing.T) {
 	}
 	defer Get().Wait()
 
-	dec := CheckAction(context.Background(), &droverwarden.GuardRequest{
+	dec := CheckAction(context.Background(), &GuardRequest{
 		TenantID: "test-tenant",
-		ToolCall: &droverwarden.ToolCall{
+		ToolCall: &ToolCall{
 			ToolName: "bash",
 			Args:     map[string]any{"command": "dangerous-unit-test rm -rf /tmp"},
 		},
@@ -129,7 +127,7 @@ func TestWardenWrapper_DefaultBeadsResolution(t *testing.T) {
 	}
 
 	// A prompt containing the pattern should be blocked by the default bead
-	dec := CheckInput(context.Background(), &droverwarden.GuardRequest{
+	dec := CheckInput(context.Background(), &GuardRequest{
 		Input: "this is a unit-test-trigger prompt",
 	})
 	if dec.Allowed {

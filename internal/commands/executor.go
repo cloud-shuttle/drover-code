@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
 	"github.com/cloudshuttle/drover-code/internal/warden"
 	"github.com/cloudshuttle/drover-code/pkg/guardclient"
 )
@@ -91,9 +90,9 @@ func (e *Executor) EvaluateAndExpand(ctx context.Context, cmdName string, rawArg
 		args = map[string]any{"args": rawArgs}
 	}
 
-	if wdec := warden.CheckAction(ctx, &droverwarden.GuardRequest{
+	if wdec := warden.CheckAction(ctx, &warden.GuardRequest{
 		TenantID: tenantID,
-		ToolCall: &droverwarden.ToolCall{
+		ToolCall: &warden.ToolCall{
 			ToolName: cmd.Name,
 			Args:     args,
 		},
