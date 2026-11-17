@@ -22,16 +22,21 @@ func TestMCPTool_Execute(t *testing.T) {
 
 	go c.readLoop()
 
+	var called string
 	go func() {
 		scanner := bufio.NewScanner(inReader)
 		for scanner.Scan() {
 			var req Request
 			if err := json.Unmarshal(scanner.Bytes(), &req); err == nil {
-				// Mock success response
-				res := Response{
-					JSONRPC: "2.0",
-					ID:      req.ID,
+				if req.Method == "tools/call" {
+					var params struct {
+						Name string `json:"name"`
+					}
+					b, _ := json.Marshal(req.Params)
+					_ = json.Unmarshal(b, &params)
+					called = params.Name
 				}
+				res := Response{JSONRPC: "2.0", ID: req.ID}
 				if req.Method == "tools/call" {
 					res.Result = json.RawMessage(`{"content":[{"type":"text","text":"hello world"}]}`)
 				}
@@ -43,7 +48,8 @@ func TestMCPTool_Execute(t *testing.T) {
 
 	tool := &MCPTool{
 		client:      c,
-		name:        "mcp_test_tool",
+		name:        "mcp_paper_get_guide",
+		callName:    "get_guide",
 		description: "Test tool",
 		inputSchema: json.RawMessage(`{}`),
 	}
@@ -58,6 +64,9 @@ func TestMCPTool_Execute(t *testing.T) {
 
 	if out != "hello world" {
 		t.Errorf("expected 'hello world', got %q", out)
+	}
+	if called != "get_guide" {
+		t.Fatalf("tools/call name %q", called)
 	}
 }
 

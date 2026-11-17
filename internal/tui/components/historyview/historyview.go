@@ -53,6 +53,55 @@ var (
 			Italic(true)
 )
 
+func init() {
+	styles.RegisterThemeChangeListener(rebuildStyles)
+}
+
+// rebuildStyles re-creates all pre-built lipgloss styles from the current
+// values of styles.Col*. Registered so that custom Settings.Theme.Colors
+// and runtime palette/mode switches are fully reflected in history rendering
+// without a TUI restart.
+func rebuildStyles() {
+	styleUserLabel = lipgloss.NewStyle().
+			Foreground(styles.ColAccent).
+			Bold(true)
+
+	styleUserBubble = lipgloss.NewStyle().
+			Background(styles.ColUserBg).
+			Foreground(styles.ColUserFg).
+			PaddingLeft(2).
+			PaddingRight(2).
+			PaddingTop(1).
+			PaddingBottom(1).
+			MarginBottom(1)
+
+	styleAssistantLabel = lipgloss.NewStyle().
+				Foreground(styles.ColMuted)
+
+	styleAssistantBody = lipgloss.NewStyle().
+				MarginBottom(1)
+
+	styleToolRow = lipgloss.NewStyle().
+			PaddingLeft(2)
+
+	styleToolName = lipgloss.NewStyle().
+			Foreground(styles.ColAccent).
+			Bold(true)
+
+	styleToolSummary = lipgloss.NewStyle().
+				Foreground(styles.ColMuted)
+
+	styleToolDone = lipgloss.NewStyle().
+			Foreground(styles.ColSuccess)
+
+	styleToolError = lipgloss.NewStyle().
+			Foreground(styles.ColError)
+
+	styleSystemNote = lipgloss.NewStyle().
+			Foreground(styles.ColSubtle).
+			Italic(true)
+}
+
 // HistoryView owns the scrollable history viewport and the list of rendered turns.
 // It handles truncation (maxHistoryDisplay), rebuilding content, and scrolling.
 type HistoryView struct {

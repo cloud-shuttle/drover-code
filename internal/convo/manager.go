@@ -59,6 +59,28 @@ func (m *Manager) Append(msg api.Message) {
 	m.messages = append(m.messages, msg)
 }
 
+// AppendUserInput adds a user prompt. A saved session can already end on a
+// user turn: the prompt was stored before the reply, or CloseDangling added a
+// tool result. The new prompt stays on that turn so the next request is not
+// two adjacent user messages.
+func (m *Manager) AppendUserInput(text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if n := len(m.messages); n > 0 && m.messages[n-1].Role == api.RoleUser {
+		msg := &m.messages[n-1]
+		if len(msg.Content) > 0 {
+			if last, ok := msg.Content[len(msg.Content)-1].(api.TextBlock); ok {
+				last.Text += "\n" + text
+				msg.Content[len(msg.Content)-1] = last
+				return
+			}
+		}
+		msg.Content = append(msg.Content, api.TextBlock{Text: text})
+		return
+	}
+	m.messages = append(m.messages, api.UserMessage(text))
+}
+
 func (m *Manager) Messages() []api.Message {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

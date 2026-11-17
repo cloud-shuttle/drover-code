@@ -15,11 +15,10 @@ import (
 
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/pkg/outcomesignal"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
 	"github.com/cloudshuttle/drover-code/internal/warden"
-	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
+	"github.com/cloudshuttle/drover-code/pkg/outcomesignal"
 )
 
 const (
@@ -62,6 +61,12 @@ type Loop struct {
 	// lastRunTurns is the agentic turn count from the most recent Run (API rounds).
 	lastRunTurns int
 
+	// lastOutput is the final assistant text from the most recent successful Run.
+	lastOutput string
+
+	// maxTurns, when > 0, stops the loop before another model call. 0 means no cap.
+	maxTurns int
+
 	// maxSessionOutputTokens, when > 0, caps cumulative OutputTokens (assistant
 	// side) across the loop; input/context size is excluded. Exceeded → ErrTokenBudgetExceeded.
 	maxSessionOutputTokens int
@@ -74,6 +79,9 @@ type Loop struct {
 
 	// lastTraceID stores the ID of the most recent trace created by this loop.
 	lastTraceID string
+
+	// persist, when set, snapshots the conversation after each appended message.
+	persist func()
 }
 
 // LastTraceID returns the TraceID of the most recent run, useful for attaching feedback.
@@ -110,6 +118,20 @@ func NewLoop(
 // model turn. When false, only manual /compact (or a fresh session) shrinks context.
 func (l *Loop) SetAutoCompaction(enabled bool) {
 	l.autoCompaction = enabled
+}
+
+// SetPersist registers a callback invoked after the conversation changes.
+// The callback may read the conversation manager. It must not call Run.
+func (l *Loop) SetPersist(fn func()) {
+	if l != nil {
+		l.persist = fn
+	}
+}
+
+func (l *Loop) snapshot() {
+	if l != nil && l.persist != nil {
+		l.persist()
+	}
 }
 
 // SetDriver overrides the inference driver for this loop.
@@ -153,6 +175,7 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		hookLinearTrace(ctx, traceID)
 	}
 	l.lastTraceID = traceID
+	l.lastOutput = ""
 
 	var finalOutput string
 	var runErr error
@@ -168,19 +191,24 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		_ = outcomesignal.WriteBYOCSpanIfConfigured(traceID, outcomesignal.FromRunError(runErr), input, finalOutput)
 	}()
 
-	l.convo.Append(api.UserMessage(input))
+	isResume := input == ""
+	if !isResume {
+		l.convo.AppendUserInput(input)
+		l.snapshot()
+	}
 
-	// Input Guard (Warden) — run on the latest user message for prompt injection / policy violations
-	lastUser := input
-	idec := warden.CheckInput(ctx, &droverwarden.GuardRequest{
-		TenantID: os.Getenv("DROVER_TENANT_ID"),
-		Input:    lastUser,
-		Context: map[string]any{
-			"agent_id": os.Getenv("DROVER_AGENT_ID"),
-		},
-	})
-	if !idec.Allowed {
-		return fmt.Errorf("input blocked by Warden: %s", idec.Result.Reason)
+	// Input Guard (Warden) — only for new user input, not for resume/continuation.
+	if !isResume {
+		idec := warden.CheckInput(ctx, &warden.GuardRequest{
+			TenantID: os.Getenv("DROVER_TENANT_ID"),
+			Input:    input,
+			Context: map[string]any{
+				"agent_id": os.Getenv("DROVER_AGENT_ID"),
+			},
+		})
+		if !idec.Allowed {
+			return fmt.Errorf("input blocked by Warden: %s", idec.Result.Reason)
+		}
 	}
 
 	var wg sync.WaitGroup
@@ -201,6 +229,11 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 	defer func() { l.lastRunTurns = turn }()
 
 	for {
+		if l.maxTurns > 0 && turn >= l.maxTurns {
+			runErr = fmt.Errorf("stopped after %d turns", l.maxTurns)
+			l.emit(ErrorEvent{Err: runErr})
+			return runErr
+		}
 		turn++
 		l.heartbeatTurn.Store(uint32(turn))
 		if err := l.ensureContextCompacted(ctx); err != nil {
@@ -236,6 +269,7 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 
 		// Record the assistant's response in conversation history.
 		l.convo.Append(api.AssistantMessage(blocks))
+		l.snapshot()
 
 		// Collect all tool calls from the response.
 		var calls []api.ToolUseBlock
@@ -250,7 +284,7 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		// Guards generated content before DoneEvent or tool execution.
 		// (Action-level guards still run per-call inside execute path.)
 		textOut := concatTextFromBlocks(blocks)
-		odec := warden.CheckOutput(ctx, &droverwarden.GuardRequest{
+		odec := warden.CheckOutput(ctx, &warden.GuardRequest{
 			TenantID: os.Getenv("DROVER_TENANT_ID"),
 			Output:   textOut,
 			Context: map[string]any{
@@ -268,6 +302,7 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		// No tool calls → the model is done; return to the user.
 		if len(calls) == 0 {
 			finalOutput = concatTextFromBlocks(blocks)
+			l.lastOutput = finalOutput
 			l.emit(DoneEvent{})
 			return nil
 		}
@@ -282,6 +317,7 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		}
 
 		l.convo.Append(api.ToolResultMessage(results))
+		l.snapshot()
 	}
 }
 
@@ -427,6 +463,7 @@ func (l *Loop) runCompactionRound(ctx context.Context, msgs []api.Message) error
 	}
 
 	l.convo.Summarise(summary, tailCount)
+	l.snapshot()
 	return nil
 }
 
@@ -569,7 +606,7 @@ func summariseInput(name string, input json.RawMessage) string {
 		return name
 	}
 
-	for _, key := range []string{"command", "path", "query", "pattern", "url"} {
+	for _, key := range []string{"command", "path", "query", "pattern", "url", "task", "question"} {
 		if v, ok := m[key]; ok {
 			var s string
 			if err := json.Unmarshal(v, &s); err == nil {
@@ -603,6 +640,21 @@ func truncate(s string, n int) string {
 // LastRunTurns returns the number of agentic (API) turns in the last Run call.
 func (l *Loop) LastRunTurns() int {
 	return l.lastRunTurns
+}
+
+// LastOutput returns the final assistant text from the most recent successful Run.
+func (l *Loop) LastOutput() string {
+	if l == nil {
+		return ""
+	}
+	return l.lastOutput
+}
+
+// SetMaxTurns caps model calls for this loop. Zero and negative values leave the loop uncapped.
+func (l *Loop) SetMaxTurns(n int) {
+	if l != nil && n > 0 {
+		l.maxTurns = n
+	}
 }
 
 // SessionInputTokens returns cumulative input tokens for this loop instance.
