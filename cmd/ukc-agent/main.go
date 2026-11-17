@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/telemetry"
-	"github.com/cloudshuttle/drover-code/internal/warden"
+	"github.com/cloud-shuttle/drover-code/internal/telemetry"
+	"github.com/cloud-shuttle/drover-code/internal/warden"
 )
 
 const (

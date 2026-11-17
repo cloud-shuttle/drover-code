@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
+	"github.com/cloud-shuttle/drover-code/internal/tools/toolutil"
 )
 
 // Create provisions a Kraft Cloud instance and waits for the agent /health endpoint.

@@ -8,9 +8,9 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cloudshuttle/drover-code/internal/tui/components/toolspinner"
-	"github.com/cloudshuttle/drover-code/internal/tui/core"
-	"github.com/cloudshuttle/drover-code/internal/tui/styles"
+	"github.com/cloud-shuttle/drover-code/internal/tui/components/toolspinner"
+	"github.com/cloud-shuttle/drover-code/internal/tui/core"
+	"github.com/cloud-shuttle/drover-code/internal/tui/styles"
 )
 
 // LiveRegion handles the live area showing active tools + streaming assistant output.

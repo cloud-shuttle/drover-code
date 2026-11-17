@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cloudshuttle/drover-code/internal/tools"
-	"github.com/cloudshuttle/drover-code/internal/warden"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/warden"
 )
 
 type Mode int

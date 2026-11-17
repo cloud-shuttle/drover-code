@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/internal/workspace"
+	"github.com/cloud-shuttle/drover-code/internal/tools/ukc"
+	"github.com/cloud-shuttle/drover-code/internal/workspace"
 )
 
 func emptyTarGz(t *testing.T) []byte {

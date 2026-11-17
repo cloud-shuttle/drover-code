@@ -1,7 +1,7 @@
 # drover-code: Go Port of Claude Code — Design Specification
 
 **Version:** 1.0  
-**Module:** `github.com/cloudshuttle/drover-code`  
+**Module:** `github.com/cloud-shuttle/drover-code`  
 **Goal:** Full feature parity with Claude Code as a single static binary with no Node/Bun dependency, using BubbleTea for the terminal UI.
 
 ---

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
+	"github.com/cloud-shuttle/drover-code/internal/tools/ukc"
 )
 
 func TestParseExecStreamChunk(t *testing.T) {

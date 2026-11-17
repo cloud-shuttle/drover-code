@@ -6,10 +6,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/tools"
-	fspkg "github.com/cloudshuttle/drover-code/internal/tools/fs"
-	searchpkg "github.com/cloudshuttle/drover-code/internal/tools/search"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
+	fspkg "github.com/cloud-shuttle/drover-code/internal/tools/fs"
+	searchpkg "github.com/cloud-shuttle/drover-code/internal/tools/search"
 )
 
 const (

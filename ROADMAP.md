@@ -22,7 +22,7 @@ Program tracking issue: in [cloud-shuttle/drover-cloud](https://github.com/cloud
 ### M0 Truth-up (due 27 Nov 2026)
 
 - [main does not build from a clean clone: go.mod needs go mod tidy](https://github.com/cloud-shuttle/drover-code/issues/19) (fixed on main by 44a199a; CI guard in #26)
-- [Fix Go module path (github.com/cloudshuttle/drover-code) and the warden replace mismatch](https://github.com/cloud-shuttle/drover-code/issues/20)
+- [Fix Go module path (github.com/cloudshuttle/drover-code) and the warden replace mismatch](https://github.com/cloud-shuttle/drover-code/issues/20) (module path fixed in the module-path PR; the warden replace went away in 44a199a)
 
 ### M1 Trace spine (due 18 Dec 2026)
 

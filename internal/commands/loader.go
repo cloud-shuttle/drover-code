@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/config"
+	"github.com/cloud-shuttle/drover-code/internal/config"
 )
 
 // Loader loads custom commands from file systems and configurations.

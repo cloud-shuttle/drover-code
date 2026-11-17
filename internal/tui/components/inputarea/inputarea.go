@@ -8,8 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
-	"github.com/cloudshuttle/drover-code/internal/tui/styles"
+	"github.com/cloud-shuttle/drover-code/internal/tui/components/liveregion"
+	"github.com/cloud-shuttle/drover-code/internal/tui/styles"
 )
 
 // Suggestion represents one autocomplete entry (name + description).

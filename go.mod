@@ -1,4 +1,4 @@
-module github.com/cloudshuttle/drover-code
+module github.com/cloud-shuttle/drover-code
 
 go 1.26.2
 

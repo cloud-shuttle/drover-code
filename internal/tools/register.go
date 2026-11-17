@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"os"
 
-	fspkg "github.com/cloudshuttle/drover-code/internal/tools/fs"
-	gitpkg "github.com/cloudshuttle/drover-code/internal/tools/git"
-	planningpkg "github.com/cloudshuttle/drover-code/internal/tools/planning"
-	qualitypkg "github.com/cloudshuttle/drover-code/internal/tools/quality"
-	searchpkg "github.com/cloudshuttle/drover-code/internal/tools/search"
-	shellpkg "github.com/cloudshuttle/drover-code/internal/tools/shell"
-	ukcpkg "github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	webpkg "github.com/cloudshuttle/drover-code/internal/tools/web"
+	fspkg "github.com/cloud-shuttle/drover-code/internal/tools/fs"
+	gitpkg "github.com/cloud-shuttle/drover-code/internal/tools/git"
+	planningpkg "github.com/cloud-shuttle/drover-code/internal/tools/planning"
+	qualitypkg "github.com/cloud-shuttle/drover-code/internal/tools/quality"
+	searchpkg "github.com/cloud-shuttle/drover-code/internal/tools/search"
+	shellpkg "github.com/cloud-shuttle/drover-code/internal/tools/shell"
+	ukcpkg "github.com/cloud-shuttle/drover-code/internal/tools/ukc"
+	webpkg "github.com/cloud-shuttle/drover-code/internal/tools/web"
 )
 
 // RegisterAll registers every built-in tool on the given Registry.

@@ -12,7 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cloudshuttle/drover-code/internal/integrations/sqlforge"
+	"github.com/cloud-shuttle/drover-code/internal/integrations/sqlforge"
 	"strconv"
 	"strings"
 	"sync"

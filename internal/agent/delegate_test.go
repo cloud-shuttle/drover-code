@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/telemetry"
-	shellpkg "github.com/cloudshuttle/drover-code/internal/tools/shell"
+	"github.com/cloud-shuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/telemetry"
+	shellpkg "github.com/cloud-shuttle/drover-code/internal/tools/shell"
 )
 
 func TestDelegateRegistry_CanEditAndCannotNest(t *testing.T) {

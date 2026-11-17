@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
 )
 
 type testErr struct{ msg string }

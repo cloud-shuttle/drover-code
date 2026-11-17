@@ -651,7 +651,7 @@ and response formatting add an explicit attribution footer:
 
 ```
 ---
-_via [drover-code](https://github.com/cloudshuttle/drover-code)_
+_via [drover-code](https://github.com/cloud-shuttle/drover-code)_
 ```
 
 This footer is added by the runner code, not the model. The model is instructed

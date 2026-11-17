@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
 )
 
 func TestApplyConvoHeuristics_contextAndChars(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/workspace"
+	"github.com/cloud-shuttle/drover-code/internal/workspace"
 )
 
 // MaybeConfirmUpload shows a TTY preview and waits for Enter unless skipped.

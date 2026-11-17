@@ -15,7 +15,7 @@ DROVER-CODE: REQUIRED MODULES, APIs & INTEGRATION POINTS
 
 COMPLETE IMPLEMENTATION REQUIREMENTS DOCUMENT
 Date: 2025
-Module: github.com/cloudshuttle/drover-code
+Module: github.com/cloud-shuttle/drover-code
 
 ================================================================================
 EXECUTIVE SUMMARY
