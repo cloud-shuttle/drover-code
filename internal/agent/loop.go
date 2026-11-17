@@ -13,7 +13,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	droverwarden "github.com/cloud-shuttle/drover-warden/warden"
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
@@ -200,7 +199,7 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 
 	// Input Guard (Warden) — only for new user input, not for resume/continuation.
 	if !isResume {
-		idec := warden.CheckInput(ctx, &droverwarden.GuardRequest{
+		idec := warden.CheckInput(ctx, &warden.GuardRequest{
 			TenantID: os.Getenv("DROVER_TENANT_ID"),
 			Input:    input,
 			Context: map[string]any{
@@ -285,7 +284,7 @@ func (l *Loop) Run(ctx context.Context, input string) error {
 		// Guards generated content before DoneEvent or tool execution.
 		// (Action-level guards still run per-call inside execute path.)
 		textOut := concatTextFromBlocks(blocks)
-		odec := warden.CheckOutput(ctx, &droverwarden.GuardRequest{
+		odec := warden.CheckOutput(ctx, &warden.GuardRequest{
 			TenantID: os.Getenv("DROVER_TENANT_ID"),
 			Output:   textOut,
 			Context: map[string]any{
