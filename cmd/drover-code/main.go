@@ -29,6 +29,7 @@ import (
 	"github.com/cloud-shuttle/drover-code/internal/tui"
 	"github.com/cloud-shuttle/drover-code/internal/warden"
 	"github.com/cloud-shuttle/drover-code/pkg/guardclient"
+	libtel "github.com/cloud-shuttle/drover-libs/pkg/telemetry"
 )
 
 const defaultModel = "claude-haiku-4-5-20251001"
@@ -55,6 +56,9 @@ func main() {
 	// Best-effort: warnings only, binary continues if collector unreachable or unset.
 	otelShutdown := telemetry.SetupOTELLogger(context.Background())
 	defer func() { _ = otelShutdown(context.Background()) }()
+	// OTel traces through drover-libs (same collector settings as the logger).
+	setupTraces(context.Background())
+	defer flushTraces()
 
 	// Subcommand dispatch: `drover-code webhook` starts the webhook server.
 	if len(os.Args) > 1 && os.Args[1] == "webhook" {
@@ -219,7 +223,8 @@ func main() {
 		}
 		rec = session.NewRecorder(store, sessionID, workDir, mgr.Messages)
 	}
-	baseCtx := telemetry.WithSessionID(context.Background(), sessionID)
+	// Continue the parent's trace (Cloud passes TRACEPARENT to hosted workers).
+	baseCtx := telemetry.WithSessionID(libtel.ContextFromEnviron(context.Background()), sessionID)
 
 	// Phase 4: Linear Telemetry Context
 	if issueID := telemetry.ExtractIssueID(workDir, startupFlags.LinearIssue); issueID != "" {
