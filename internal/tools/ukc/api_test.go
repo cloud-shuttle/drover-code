@@ -34,6 +34,15 @@ func TestCreateInstanceOmitsMetro(t *testing.T) {
 	if _, ok := got["metro"]; ok {
 		t.Fatalf("body included metro")
 	}
+	sg, _ := got["service_group"].(map[string]any)
+	domains, _ := sg["domains"].([]any)
+	if len(domains) != 1 {
+		t.Fatalf("domains: %#v", sg["domains"])
+	}
+	domain, _ := domains[0].(map[string]any)
+	if domain["name"] != "worker" {
+		t.Fatalf("domain name: %#v", domain["name"])
+	}
 }
 
 func TestInstanceHTTPSURL_fallbackMetro(t *testing.T) {
