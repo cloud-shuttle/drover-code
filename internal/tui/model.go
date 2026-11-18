@@ -709,13 +709,19 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 
 	case agent.DoneEvent:
 		raw := m.streamBuf.String()
-		if raw != "" {
-			rendered := m.renderMarkdown(raw)
 
-			// LiveRegion is the sole source for completed tools for this turn
-			var completed []core.CompletedTool
-			if drained := m.Live.DrainCompletedTools(); len(drained) > 0 {
-				completed = drained
+		// LiveRegion is the sole source for completed tools for this turn.
+		// Drain before deciding whether to record the turn so a tool-only
+		// turn (no streamed text, e.g. a resumed run) is not dropped.
+		var completed []core.CompletedTool
+		if drained := m.Live.DrainCompletedTools(); len(drained) > 0 {
+			completed = drained
+		}
+
+		if raw != "" || len(completed) > 0 {
+			rendered := ""
+			if raw != "" {
+				rendered = m.renderMarkdown(raw)
 			}
 
 			// HistoryView is the sole owner of conversation history
@@ -751,7 +757,14 @@ func (m *Model) handleAgentEvent(ev agent.Event) tea.Cmd {
 
 	case agent.ErrorEvent:
 		m.clearAsk()
-		m.lastError = e.Err.Error()
+		if errors.Is(e.Err, context.Canceled) {
+			// Cancellation comes from /pause (runCancel). Event and run-complete
+			// messages can arrive in either order, so report the pause here too
+			// instead of surfacing a raw "context canceled".
+			m.lastError = "Agent paused by user."
+		} else {
+			m.lastError = e.Err.Error()
+		}
 		m.agentBusy = false
 		_ = m.InputArea.DrainQueue() // Clear the queue on error
 		m.Live.Streaming = false
@@ -1142,7 +1155,7 @@ func (m *Model) tokensInfoText() string {
 
 func (m *Model) modelInfoText() string {
 	return strings.TrimSpace(fmt.Sprintf(
-		"(/model) Active model: %s\nTheme: palette=%s mode=%s (Ctrl+K → Theme or /theme <palette> <mode>)\nCustom overrides: Settings.Theme.Colors in .claude/settings.json",
+		"(/model) Active model: %s\nTheme: palette=%s mode=%s (Ctrl+K → Theme or /theme <palette> <mode>)\nCustom overrides: Settings.Theme.Colors in .drover/settings.json",
 		m.modelName,
 		styles.CurrentTheme.Name,
 		CurrentThemeMode,

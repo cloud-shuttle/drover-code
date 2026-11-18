@@ -27,14 +27,14 @@ func TestGitHeadSHA(t *testing.T) {
 	// has to be set on the command or commit exits 128 and HEAD is missing.
 	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0o644)
 	if out, err := exec.Command("git", "-C", dir, "add", "test.txt").CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
+		t.Fatalf("git add: %v: %s", err, out)
 	}
+	// CI runners have no global git identity; set one for this commit only.
 	commit := exec.Command("git", "-C", dir,
-		"-c", "user.email=drover-test@example.com",
-		"-c", "user.name=drover-test",
-		"commit", "-m", "init")
+		"-c", "user.name=drover-test", "-c", "user.email=drover-test@example.invalid",
+		"-c", "commit.gpgsign=false", "commit", "-m", "init")
 	if out, err := commit.CombinedOutput(); err != nil {
-		t.Fatalf("git commit: %v\n%s", err, out)
+		t.Fatalf("git commit: %v: %s", err, out)
 	}
 
 	sha, err := gitHeadSHA(context.Background(), dir)

@@ -1,6 +1,9 @@
 // Package config loads and merges drover-code settings from the three-level
-// hierarchy: global (~/.claude/settings.json) → project (.claude/settings.json)
-// → local (.claude/settings.local.json).
+// hierarchy: global (~/.drover/settings.json) → project (.drover/settings.json)
+// → local (.drover/settings.local.json).
+//
+// Legacy Claude Code paths (~/.claude and .claude at each level) are still read
+// when present; drover paths override claude paths at the same tier.
 //
 // It also walks the directory tree for CLAUDE.md files and concatenates them
 // into a system-prompt injection.
@@ -60,8 +63,11 @@ type Settings struct {
 	ProjectMarkdownMaxFiles    int                        `json:"projectMarkdownMaxFiles,omitempty"`
 	ProjectMarkdownIgnoreGlobs []string                   `json:"projectMarkdownIgnoreGlobs,omitempty"`
 	DisableAutoCompaction      bool                       `json:"disableAutoCompaction,omitempty"`
-	DreamMaxRetentionEntries   int                        `json:"dreamMaxRetentionEntries,omitempty"`
-	DreamMaxRetentionAgeDays   int                        `json:"dreamMaxRetentionAgeDays,omitempty"`
+	// MaxAgentTiers tightens the operator delegation ceiling (max 3). Values above the
+	// operator ceiling are ignored; zero means use the operator default.
+	MaxAgentTiers            int `json:"maxAgentTiers,omitempty"`
+	DreamMaxRetentionEntries int `json:"dreamMaxRetentionEntries,omitempty"`
+	DreamMaxRetentionAgeDays int `json:"dreamMaxRetentionAgeDays,omitempty"`
 
 	// Theme accepts Claude's string form ("dark") and the object form.
 	Theme ThemeConfig `json:"theme,omitempty"`
@@ -90,8 +96,19 @@ func NewLoader(workDir string) *Loader {
 	home, _ := os.UserHomeDir()
 	return &Loader{
 		workDir:    workDir,
-		globalDir:  filepath.Join(home, ".claude"),
-		projectDir: filepath.Join(workDir, ".claude"),
+		globalDir:  filepath.Join(home, ".drover"),
+		projectDir: filepath.Join(workDir, ".drover"),
+	}
+}
+
+func settingsLoadPaths(home, workDir string) []string {
+	return []string{
+		filepath.Join(home, ".claude", "settings.json"),
+		filepath.Join(home, ".drover", "settings.json"),
+		filepath.Join(workDir, ".claude", "settings.json"),
+		filepath.Join(workDir, ".drover", "settings.json"),
+		filepath.Join(workDir, ".claude", "settings.local.json"),
+		filepath.Join(workDir, ".drover", "settings.local.json"),
 	}
 }
 
@@ -101,11 +118,8 @@ func (l *Loader) Load() error {
 	defer l.mu.Unlock()
 
 	var merged Settings
-	paths := []string{
-		filepath.Join(l.globalDir, "settings.json"),
-		filepath.Join(l.projectDir, "settings.json"),
-		filepath.Join(l.projectDir, "settings.local.json"),
-	}
+	home, _ := os.UserHomeDir()
+	paths := settingsLoadPaths(home, l.workDir)
 
 	for _, p := range paths {
 		data, err := os.ReadFile(p)

@@ -1,4 +1,6 @@
-# Agent Context for Drover Code
+# Agent Context
+
+> **Note to AI Agents:** The Diátaxis agent context also lives at [`docs/reference/agent-context.md`](docs/reference/agent-context.md).
 
 Welcome, AI Agent. This file is intended to help AI coding assistants understand the structure, context, and conventions of the `drover-code` repository.
 
@@ -27,7 +29,7 @@ Welcome, AI Agent. This file is intended to help AI coding assistants understand
 | `internal/tools` | Tool registry and implementations |
 | `internal/tui` | Bubble Tea model and views |
 | `internal/dream` | Session memory (JSON / SQLite) |
-| `design/` | Design specs and roadmap (numbered `01-…`, test plan `13`, UX `14`) |
+| `docs/adr/` | Design specs and roadmap (numbered `01-…`, test plan `13`, UX `14`) |
 | `docs/` | User-facing docs (Tutorials, How-Tos, Reference, Explanation) |
 
 ## Build and test
@@ -45,7 +47,7 @@ Fuzz targets are listed in `.github/workflows/ci.yml` (`fuzz` job).
 ## Conventions
 
 - Prefer focused changes: match existing style, imports, and error wrapping in touched packages.
-- Property / fuzz tests: see `design/12-property-fuzz-testing.md` and doc `13-test-coverage-plan.md`.
+- Property / fuzz tests: see `docs/adr/12-property-fuzz-testing.md` and doc `13-test-coverage-plan.md`.
 - Do not assume Node: this is Go-only for the main binary.
 
 ## Product behavior pointers
@@ -75,6 +77,20 @@ The TUI was migrated from a god-model (~956–1290 LOC in model.go) to a proper 
 - Guard hooks are real: `pkg/guardclient`, `assessPermissionRisk` (file + bash dangerous patterns), `GuardRiskLevel/Reason` on Model, StatusBar renders risk state.
 
 **Migration history (important for future edits):**
-A safe dual-state period was used (legacy Model fields like m.history/m.activeTools/m.permPrompt lived alongside the component fields). All mutations hit both during transition. Once every call site + test was updated, legacy paths and fields were deleted in focused consolidation passes (HistoryView first, LiveRegion second, Permission + full permission.go deletion third). InputArea kept a lighter `syncInputArea()` bridge. Snapshots and 20+ history/fuzz/e2e tests never drifted. See `design/20-week-1-tui-component-migration.md` (Reality Record section) and beads dcode-001..009 for the full story.
+A safe dual-state period was used (legacy Model fields like m.history/m.activeTools/m.permPrompt lived alongside the component fields). All mutations hit both during transition. Once every call site + test was updated, legacy paths and fields were deleted in focused consolidation passes (HistoryView first, LiveRegion second, Permission + full permission.go deletion third). InputArea kept a lighter `syncInputArea()` bridge. Snapshots and 20+ history/fuzz/e2e tests never drifted. See `docs/adr/20-week-1-tui-component-migration.md` (Reality Record section) and beads dcode-001..009 for the full story.
 
 When touching TUI code, prefer the component APIs. Update the component's isolated test + the integration snapshots. Do not re-introduce direct mutations on legacy fields that have been removed.
+
+## Harness discipline
+
+Runtime gates (mandatory even when skills are skipped):
+
+| Gate | Package |
+|------|---------|
+| Trusted delegation depth | `internal/agent/lineage.go` |
+| Alignment / SPEC checkpoint | `internal/harness` |
+| Verifier-per-PR | `internal/verification` |
+| Context occupancy budget | `internal/convo/budget.go` |
+| ADR selection | `internal/config/adr_loader.go` → `docs/adr/` |
+
+Recipes (not enforcement): `.drover/skills/grill`, `.drover/skills/verify`. Feature map: `design/harness/README.md`.

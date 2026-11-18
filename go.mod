@@ -21,6 +21,7 @@ require (
 	go.opentelemetry.io/otel/sdk/log v1.47.0
 	golang.org/x/sync v0.24.0
 	modernc.org/sqlite v1.34.5
+	pgregory.net/rapid v1.3.0
 )
 
 require (

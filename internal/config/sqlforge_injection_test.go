@@ -12,10 +12,10 @@ func TestLoadInjectsSQLForgeGuidance(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(proj, "sqlforge.yml"), []byte("default_environment: dev\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(proj, ".drover"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"), []byte(`{}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(proj, ".drover", "settings.json"), []byte(`{}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
