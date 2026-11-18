@@ -19,6 +19,7 @@ import (
 	"github.com/cloudshuttle/drover-code/internal/agent"
 	"github.com/cloudshuttle/drover-code/internal/api"
 	"github.com/cloudshuttle/drover-code/internal/config"
+	"github.com/cloudshuttle/drover-code/internal/harness"
 	"github.com/cloudshuttle/drover-code/internal/convo"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
@@ -57,6 +58,10 @@ type Coordinator struct {
 	settings   config.Settings
 	MaxWorkers int
 	gitMu      sync.Mutex
+	// Lineage is the trusted parent identity for worker spawns.
+	Lineage agent.Lineage
+	// Policy clamps MaxAgentTiers (repo may tighten, never raise past operator ceiling).
+	Policy agent.Policy
 }
 
 func New(client *api.Client, registry *tools.Registry, workDir string, eventCh chan<- agent.Event, settings config.Settings) *Coordinator {
@@ -77,6 +82,10 @@ func (c *Coordinator) Execute(ctx context.Context, task string) (string, error) 
 
 func (c *Coordinator) ExecuteWithResults(ctx context.Context, task string) (ExecuteOutcome, error) {
 	var z ExecuteOutcome
+
+	if c.Policy.MaxAgentTiers == 0 && c.settings.MaxAgentTiers > 0 {
+		c.Policy.MaxAgentTiers = c.settings.MaxAgentTiers
+	}
 
 	c.eventCh <- agent.TextDeltaEvent{Text: "Decomposing task into subtasks via Anthropic API...\n"}
 
@@ -254,6 +263,20 @@ func (c *Coordinator) executeWorkers(ctx context.Context, subtasks []Subtask) ([
 }
 
 func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, error) {
+	policy := c.Policy
+	if policy.MaxAgentTiers == 0 {
+		policy.MaxAgentTiers = agent.OperatorMaxAgentTiers
+	}
+	parent := c.Lineage
+	if !parent.Trusted {
+		// Trusted ingress should have set lineage; mint a local root for interactive coordinator.
+		parent = agent.NewRootLineage("coordinator", "coordinator-root", c.workDir, "", time.Time{}, 0)
+	}
+	if err := agent.AdmitSpawn(parent, policy); err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, Output: err.Error(), IsError: true}, err
+	}
+	childLin := parent.Child(fmt.Sprintf("worker-%d", st.Index))
+
 	workerMgr := convo.NewManagerWithSystem(workerSystemPrompt(st.Description))
 	config.ApplyConvoHeuristics(workerMgr, c.settings)
 
@@ -274,6 +297,20 @@ func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, 
 
 	workerDriver := agent.NewAnthropicInferenceDriver(c.client)
 	workerExecutor := agent.NewDefaultToolExecutor(reg, permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll), workerEvents)
+	gate := harness.NewGate(repoMount)
+	gate.RequireForHeadless = true
+	// Workers inherit approved-spec binding from parent lineage when present.
+	if childLin.ApprovedSpec != "" && childLin.Scope != "" {
+		_ = gate.Accept(harness.Spec{
+			TaskID:      "coord-" + childLin.RootID,
+			WorkSize:    harness.WorkSmall,
+			SkipReason:  "coordinator worker bound to parent approved_spec_hash=" + childLin.ApprovedSpec,
+			Approver:    "coordinator:" + childLin.ParentID,
+			ContentHash: childLin.ApprovedSpec,
+			Boundaries:  []string{childLin.Scope},
+		})
+	}
+	workerExecutor.SetGate(gate)
 	workerLoop := agent.NewLoop(
 		workerDriver,
 		workerMgr,
@@ -281,6 +318,7 @@ func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, 
 		reg,
 		workerEvents,
 	)
+	workerLoop.SetLineage(childLin)
 	config.ApplyAgentLoopOptions(workerLoop, c.settings)
 
 	var output strings.Builder
