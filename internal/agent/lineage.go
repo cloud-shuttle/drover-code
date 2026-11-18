@@ -77,11 +77,11 @@ func (p Lineage) Child(childID string) Lineage {
 
 // DelegationDeniedEvent is the structured deny payload (no prompts).
 type DelegationDeniedEvent struct {
-	RootID          string `json:"root_id"`
-	ParentID        string `json:"parent_id"`
-	RequestedDepth  int    `json:"requested_depth"`
-	MaxTiers        int    `json:"max_tiers"`
-	Reason          string `json:"reason"`
+	RootID         string `json:"root_id"`
+	ParentID       string `json:"parent_id"`
+	RequestedDepth int    `json:"requested_depth"`
+	MaxTiers       int    `json:"max_tiers"`
+	Reason         string `json:"reason"`
 }
 
 func (e DelegationDeniedEvent) Error() string {

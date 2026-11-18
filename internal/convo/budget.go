@@ -19,7 +19,7 @@ type Budget struct {
 	ModelWindow   int
 	OutputReserve int
 	SafetyMargin  int
-	SoftThreshold int // min(100000, model_window - output_reserve - safety_margin)
+	SoftThreshold int     // min(100000, model_window - output_reserve - safety_margin)
 	WarnRatio     float64 // default 0.8
 }
 
@@ -96,12 +96,12 @@ func (b *Budget) AddRootSpend(tokens int64) {
 
 // Snapshot is a consistent read of budget counters.
 type Snapshot struct {
-	Occupancy     int
+	Occupancy      int
 	LifetimeBilled int64
-	RootSpend     int64
-	SoftThreshold int
-	Warn          bool
-	OverSoft      bool
+	RootSpend      int64
+	SoftThreshold  int
+	Warn           bool
+	OverSoft       bool
 }
 
 // Snapshot returns current counters. Cumulative usage alone must not trigger
@@ -110,10 +110,10 @@ func (b *Budget) Snapshot() Snapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	s := Snapshot{
-		Occupancy:     b.Occupancy,
+		Occupancy:      b.Occupancy,
 		LifetimeBilled: b.LifetimeBilled,
-		RootSpend:     b.RootSpend,
-		SoftThreshold: b.SoftThreshold,
+		RootSpend:      b.RootSpend,
+		SoftThreshold:  b.SoftThreshold,
 	}
 	if b.SoftThreshold > 0 {
 		s.OverSoft = b.Occupancy > b.SoftThreshold

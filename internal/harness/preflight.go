@@ -36,17 +36,17 @@ var ErrScopeExpanded = errors.New("scope expansion requires re-approval")
 
 // Spec is the approved planning artifact (docs/tasks/<id>/SPEC.md content metadata).
 type Spec struct {
-	TaskID       string   `json:"task_id"`
-	Goal         string   `json:"goal"`
-	NonGoals     []string `json:"non_goals,omitempty"`
-	Constraints  []string `json:"constraints,omitempty"`
-	Boundaries   []string `json:"boundaries,omitempty"` // touched paths / packages
-	Acceptance   []string `json:"acceptance,omitempty"`
-	WorkSize     WorkSize `json:"work_size"`
-	SkipReason   string   `json:"skip_reason,omitempty"` // required when WorkSmall
-	ContentHash  string   `json:"content_hash"`
-	RepoRevision string   `json:"repo_revision,omitempty"`
-	Approver     string   `json:"approver,omitempty"`
+	TaskID       string    `json:"task_id"`
+	Goal         string    `json:"goal"`
+	NonGoals     []string  `json:"non_goals,omitempty"`
+	Constraints  []string  `json:"constraints,omitempty"`
+	Boundaries   []string  `json:"boundaries,omitempty"` // touched paths / packages
+	Acceptance   []string  `json:"acceptance,omitempty"`
+	WorkSize     WorkSize  `json:"work_size"`
+	SkipReason   string    `json:"skip_reason,omitempty"` // required when WorkSmall
+	ContentHash  string    `json:"content_hash"`
+	RepoRevision string    `json:"repo_revision,omitempty"`
+	Approver     string    `json:"approver,omitempty"`
 	ApprovedAt   time.Time `json:"approved_at,omitempty"`
 }
 

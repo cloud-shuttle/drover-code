@@ -98,4 +98,3 @@ func TestProperty_ResetClearsHistory(t *testing.T) {
 		}
 	})
 }
-

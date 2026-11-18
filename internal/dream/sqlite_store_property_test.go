@@ -77,7 +77,7 @@ func TestProperty_SQLitePruneLimits(t *testing.T) {
 				}
 			}
 		}
-		
+
 		store.(*sqliteStore).Close()
 	})
 }
@@ -118,11 +118,11 @@ func TestProperty_SQLitePersistenceIntegrity(t *testing.T) {
 		if loaded.SessionID != entry.SessionID {
 			rt.Fatalf("SessionID mismatch")
 		}
-		
+
 		if loaded.Timestamp.UnixNano() != entry.Timestamp.UnixNano() {
 			rt.Fatalf("Timestamp mismatch: got %v, want %v", loaded.Timestamp, entry.Timestamp)
 		}
-		
+
 		if len(loaded.Tags) != len(entry.Tags) {
 			rt.Fatalf("Tags length mismatch: got %d, want %d", len(loaded.Tags), len(entry.Tags))
 		}
