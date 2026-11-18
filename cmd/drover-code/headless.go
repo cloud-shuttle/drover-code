@@ -105,6 +105,7 @@ func runHeadless(
 	}
 	useJSONL := headlessUseJSONL()
 	headlessSession = sessionLogFromEnv()
+	ctx = startHeadlessRun(ctx, &headlessSession)
 	headlessSession.begin()
 	if useJSONL {
 		go drainHeadlessJSONL(eventCh)
@@ -286,6 +287,7 @@ func runHeadless(
 		exitHeadless(1, "failed")
 	}
 	headlessSession.finish("completed")
+	endHeadlessRun("completed")
 }
 
 func feedBackgroundResults(ctx context.Context, loop *agent.Loop, bashTool *shellpkg.Bash, done <-chan shellpkg.Notice) (int, error) {

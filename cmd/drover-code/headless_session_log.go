@@ -5,7 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cloud-shuttle/drover-code/internal/agent"
-	"github.com/cloud-shuttle/drover-code/pkg/sessionevent"
+	"github.com/cloud-shuttle/drover-libs/pkg/sessionevent"
 )
 
 // headlessSession is set for the life of runHeadless so the event drains
@@ -18,6 +18,10 @@ type sessionLog struct {
 	issueID   string
 	phase     string
 	envelope  bool
+	// traceID and spanID are the headless run span's W3C IDs, written on
+	// every event so the run viewer can join the log to otel_traces.
+	traceID string
+	spanID  string
 }
 
 func sessionLogFromEnv() sessionLog {
@@ -43,6 +47,8 @@ func (l sessionLog) append(typ string, data map[string]any) {
 	ev := sessionevent.New(typ, l.sessionID, data)
 	ev.IssueID = l.issueID
 	ev.Phase = l.phase
+	ev.TraceID = l.traceID
+	ev.SpanID = l.spanID
 	_ = sessionevent.Append(l.path, ev)
 }
 
@@ -128,6 +134,7 @@ func releaseBackground() {
 func exitHeadless(code int, status string) {
 	releaseBackground()
 	headlessSession.finish(status)
+	endHeadlessRun(status)
 	os.Exit(code)
 }
 
