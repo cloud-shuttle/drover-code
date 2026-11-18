@@ -128,4 +128,3 @@ func (s *Schema) Build() json.RawMessage {
 	b, _ := json.Marshal(s.m)
 	return b
 }
-

@@ -264,4 +264,3 @@ func (e *Engine) hasRuleLocked(tool string, kind RuleKind) bool {
 	}
 	return false
 }
-

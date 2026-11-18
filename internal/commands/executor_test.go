@@ -20,12 +20,12 @@ func TestExecutor_E2E(t *testing.T) {
 		if r.URL.Path != "/v1/evaluate" {
 			t.Errorf("expected path /v1/evaluate, got %s", r.URL.Path)
 		}
-		
+
 		var req guardclient.EvaluateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("failed to decode request: %v", err)
 		}
-		
+
 		requestedRiskTier = req.RiskTier
 
 		resp := guardclient.EvaluateResponse{
@@ -69,12 +69,12 @@ do dangerous thing`
 	// Setup client and executor
 	os.Setenv("DROVER_GUARD_URL", mockServer.URL)
 	defer os.Unsetenv("DROVER_GUARD_URL")
-	
+
 	guardClient := guardclient.NewClient(mockServer.URL, "mock-token")
 	loader := NewLoader(workDir)
 	_ = loader.LoadAll(config.Settings{})
 	registry := loader.GetRegistry()
-	
+
 	expander := NewTemplateExpander(workDir)
 	executor := NewExecutor(registry, expander, guardClient)
 

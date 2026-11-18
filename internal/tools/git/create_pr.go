@@ -22,8 +22,8 @@ type CreatePR struct {
 type prInput struct {
 	Title       string   `json:"title"`
 	Body        string   `json:"body,omitempty"`
-	Base        string   `json:"base,omitempty"`     // default: main/master
-	Head        string   `json:"head,omitempty"`     // branch to merge from
+	Base        string   `json:"base,omitempty"` // default: main/master
+	Head        string   `json:"head,omitempty"` // branch to merge from
 	Draft       bool     `json:"draft,omitempty"`
 	AutoReview  bool     `json:"auto_review,omitempty"` // default: true
 	ExtraChecks []string `json:"extra_checks,omitempty"`
@@ -152,7 +152,7 @@ func (t *CreatePR) getRepoInfo(ctx context.Context) (owner, repo string, err err
 	}
 	// Parse github.com/owner/repo.git or git@github.com:owner/repo.git
 	remote := strings.TrimSpace(out)
-	
+
 	// Handle git@github.com:owner/repo.git
 	if strings.HasPrefix(remote, "git@") {
 		parts := strings.Split(remote, ":")
@@ -165,7 +165,7 @@ func (t *CreatePR) getRepoInfo(ctx context.Context) (owner, repo string, err err
 			}
 		}
 	}
-	
+
 	// Handle https://github.com/owner/repo.git
 	parts := strings.Split(remote, "/")
 	if len(parts) >= 2 {

@@ -81,7 +81,7 @@ func ParseExecStreamChunk(r io.Reader, onLine func(string), out *strings.Builder
 
 	for sc.Scan() {
 		line := sc.Text()
-		
+
 		if strings.HasPrefix(line, "id:") {
 			*lastEventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 			continue

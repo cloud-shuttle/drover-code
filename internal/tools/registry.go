@@ -114,4 +114,3 @@ type PermissionFunc func(ctx context.Context, req PermissionRequest) Decision
 
 // AllowAll is a PermissionFunc that approves every tool call without prompting.
 func AllowAll(_ context.Context, _ PermissionRequest) Decision { return Allow }
-

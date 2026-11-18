@@ -492,12 +492,17 @@ func TestModel_PauseResumeCommands(t *testing.T) {
 		t.Errorf("expected lastPauseReason 'runaway tool', got %q", m.lastPauseReason)
 	}
 
-	// The runner reports a canceled run as agentRunCompleteMsg. ErrorEvent
-	// keeps the raw error text and does not write the pause history turn.
-	next, _ := m.Update(agentRunCompleteMsg{err: context.Canceled})
+	// The loop emits ErrorEvent, then the runner sends agentRunCompleteMsg.
+	// ErrorEvent for a cancel reports the pause instead of "context canceled".
+	next, _ := m.Update(agentMsg{event: agent.ErrorEvent{Err: context.Canceled}})
 	m2 := next.(*Model)
 	if !strings.Contains(m2.lastError, "paused") {
 		t.Errorf("expected paused error, got %q", m2.lastError)
+	}
+	next, _ = m2.Update(agentRunCompleteMsg{err: context.Canceled})
+	m2 = next.(*Model)
+	if !strings.Contains(m2.lastError, "paused") {
+		t.Errorf("expected paused error after run complete, got %q", m2.lastError)
 	}
 	turns := m2.HistoryView.GetTurns()
 	if len(turns) == 0 {
@@ -666,7 +671,10 @@ func TestModel_FullPauseResumeDuringRealToolRun(t *testing.T) {
 		}
 	}
 	if !recorded {
-		t.Error("expected the tool from the paused+resumed run to be recorded")
+		t.Error("expected the tool from the paused+resumed run to be recorded in final history")
+	}
+	if m.Live != nil && len(m.Live.CompletedTools) != 0 {
+		t.Error("expected LiveRegion completed tools to be drained after DoneEvent")
 	}
 }
 

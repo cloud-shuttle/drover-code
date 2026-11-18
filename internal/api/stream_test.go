@@ -130,4 +130,3 @@ func TestStream_ErrorEvent(t *testing.T) {
 		t.Fatalf("expected error to contain message, got: %v", st.Err())
 	}
 }
-

@@ -178,7 +178,7 @@ func (t *BuildTemplate) Execute(ctx context.Context, raw json.RawMessage) (strin
 
 	// 1. Boot a temporary base instance
 	tempName := fmt.Sprintf("builder-%s-%d", in.Environment, time.Now().Unix())
-	
+
 	token, err := RandToken()
 	if err != nil {
 		return "", fmt.Errorf("ukc_build_template: token: %w", err)
@@ -222,7 +222,7 @@ func (t *BuildTemplate) Execute(ctx context.Context, raw json.RawMessage) (strin
 	// Sleep briefly to let the cloud snapshot finish
 	time.Sleep(5 * time.Second)
 
-	// In KraftCloud, the UUID of the snapshot is usually the instance UUID, or you can 
+	// In KraftCloud, the UUID of the snapshot is usually the instance UUID, or you can
 	// boot from an instance UUID if it has been snapshotted (template).
 	templateUUID := inst.UUID
 

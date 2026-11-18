@@ -43,4 +43,3 @@ type CommandProvider func() []Command
 // by the TUI. If it returns nil, the palette will fall back to the default
 // behavior (text injection for unknown keys).
 type ActionHandler func(actionKey string) tea.Cmd
-

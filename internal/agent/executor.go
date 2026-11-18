@@ -9,6 +9,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/cloudshuttle/drover-code/internal/api"
+	"github.com/cloudshuttle/drover-code/internal/harness"
 	"github.com/cloudshuttle/drover-code/internal/permissions"
 	"github.com/cloudshuttle/drover-code/internal/telemetry"
 	"github.com/cloudshuttle/drover-code/internal/tools"
@@ -23,6 +24,7 @@ type DefaultToolExecutor struct {
 	registry *tools.Registry
 	perm     *permissions.Engine
 	eventCh  chan<- Event
+	gate     *harness.Gate
 }
 
 func NewDefaultToolExecutor(registry *tools.Registry, perm *permissions.Engine, eventCh chan<- Event) *DefaultToolExecutor {
@@ -31,6 +33,12 @@ func NewDefaultToolExecutor(registry *tools.Registry, perm *permissions.Engine, 
 		perm:     perm,
 		eventCh:  eventCh,
 	}
+}
+
+// SetGate attaches an alignment gate. When set, mutating tools are refused
+// until an accepted checkpoint exists (see internal/harness).
+func (e *DefaultToolExecutor) SetGate(g *harness.Gate) {
+	e.gate = g
 }
 
 func planModeRefusal(tool string) string {
@@ -83,6 +91,24 @@ func (e *DefaultToolExecutor) ExecuteTools(ctx context.Context, calls []api.Tool
 }
 
 func (e *DefaultToolExecutor) executeSingleTool(ctx context.Context, idx int, call api.ToolUseBlock, preDecisions []tools.Decision) (api.ToolResultBlock, error) {
+
+	if e.gate != nil && harness.IsMutating(call.Name) {
+		if err := e.gate.AllowMutation(call.Name, nil); err != nil {
+			e.emit(ToolDoneEvent{
+				CallIndex:     idx,
+				ID:            call.ID,
+				Name:          call.Name,
+				IsError:       true,
+				OutputSummary: "blocked by harness gate",
+			})
+			return api.ToolResultBlock{
+				ToolUseID: call.ID,
+				Content:   "Tool execution blocked by harness alignment gate: " + err.Error(),
+				IsError:   true,
+			}, nil
+		}
+	}
+
 	if idx < len(preDecisions) && preDecisions[idx] != tools.Decision(-1) {
 		if preDecisions[idx] == tools.Deny {
 			content := "Tool execution denied by user."

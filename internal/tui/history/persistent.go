@@ -62,7 +62,7 @@ func (h *PersistentHistory) Add(message string) {
 			filtered = append(filtered, entry)
 		}
 	}
-	
+
 	filtered = append(filtered, message)
 	h.entries = filtered
 
@@ -75,7 +75,7 @@ func (h *PersistentHistory) Add(message string) {
 }
 
 // Get returns history entries in chronological order (oldest first)
-// Wait, the user's snippet said "reverse chronological order (newest first)" and reversed it, but in the TUI navigation Up goes to historyIndex--, which assumes oldest first (if you append to the end) or newest first if you start at index 0. 
+// Wait, the user's snippet said "reverse chronological order (newest first)" and reversed it, but in the TUI navigation Up goes to historyIndex--, which assumes oldest first (if you append to the end) or newest first if you start at index 0.
 // Our TUI Model.Update navigation used `inputHistory` natively where index len(inputHistory)-1 is the newest.
 // Let's just return the raw entries slice, where the end is the newest.
 func (h *PersistentHistory) Get() []string {

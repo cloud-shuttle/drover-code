@@ -45,7 +45,6 @@ func apiBaseForMetro(metro string) string {
 type createInstanceBody struct {
 	Name         string                      `json:"name"`
 	Image        string                      `json:"image"`
-	Metro        string                      `json:"metro,omitempty"`
 	MemoryMB     int                         `json:"memory_mb,omitempty"`
 	Env          map[string]string           `json:"env,omitempty"`
 	Autostart    bool                        `json:"autostart"`
@@ -104,18 +103,10 @@ func CreateInstance(ctx context.Context, cfg Config, name, image string, memoryM
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
-	metro := strings.TrimSpace(cfg.Metro)
-	if metro == "" {
-		metro = "fra"
-	}
-	// If the metro is actually a full URL, do not send the metro field in the JSON payload
-	if strings.HasPrefix(metro, "http://") || strings.HasPrefix(metro, "https://") {
-		metro = ""
-	}
+	// The API host is already the metro. This API rejects a metro field in the body.
 	body := createInstanceBody{
 		Name:      name,
 		Image:     image,
-		Metro:     metro,
 		Autostart: true,
 		ServiceGroup: &createInstanceServiceGroup{
 			Services: []apiService{{
@@ -305,7 +296,7 @@ func InstanceHTTPSURL(inst Instance) string {
 			return "https://" + host
 		}
 	}
-	
+
 	// Fallback (will probably 404 since port 443 is on the SG, not the instance)
 	if inst.FQDN != "" {
 		host := strings.TrimSuffix(inst.FQDN, ".")
