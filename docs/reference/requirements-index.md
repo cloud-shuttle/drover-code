@@ -420,5 +420,5 @@ TOTAL                        2,517  17,000  77.5K
 ---
 
 *Last updated: 2025*  
-*Part of drover-code project: github.com/cloudshuttle/drover-code*  
+*Part of drover-code project: github.com/cloud-shuttle/drover-code*  
 *These documents describe the complete system architecture and integration requirements.*

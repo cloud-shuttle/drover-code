@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -65,7 +66,11 @@ func (jr *jobRunner) runCommand(parent context.Context, j *job, command string) 
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	cmd.Dir = "/workspace"
+	if dir := os.Getenv("UKC_AGENT_WORKSPACE"); dir != "" {
+		cmd.Dir = dir
+	} else {
+		cmd.Dir = "/workspace"
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		j.emitThenClose(err.Error(), 1)
