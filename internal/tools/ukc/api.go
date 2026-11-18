@@ -80,10 +80,16 @@ type Instance struct {
 }
 
 type ServiceGroup struct {
-	UUID    string `json:"uuid"`
-	Domains []struct {
-		FQDN string `json:"fqdn"`
-	} `json:"domains"`
+	UUID    string          `json:"uuid"`
+	Name    string          `json:"name"`
+	Domains []ServiceDomain `json:"domains"`
+}
+
+// ServiceDomain is one public name on a service group.
+// Create responses sometimes set name and leave fqdn empty.
+type ServiceDomain struct {
+	FQDN string `json:"fqdn"`
+	Name string `json:"name"`
 }
 
 type deleteInstancesBody []nameOrUUID
@@ -283,30 +289,152 @@ func StopInstance(ctx context.Context, cfg Config, uuid string) error {
 	return nil
 }
 
-// InstanceHTTPSURL returns a public HTTPS base URL for health and agent calls.
-func InstanceHTTPSURL(inst Instance) string {
-	// If the API returns the Service Group domain directly, use it!
-	if inst.ServiceGroup != nil && len(inst.ServiceGroup.Domains) > 0 {
-		host := strings.TrimSpace(inst.ServiceGroup.Domains[0].FQDN)
-		host = strings.TrimSuffix(host, ".")
-		if host != "" {
-			if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
-				return host
-			}
-			return "https://" + host
+// MetroID reduces a metro flag or API origin to the metro id.
+// https://api.syd0-plausible-gnu.unikraft.cloud and syd0-plausible-gnu both become syd0-plausible-gnu.
+func MetroID(metro string) string {
+	metro = strings.TrimSpace(metro)
+	metro = strings.TrimPrefix(metro, "https://")
+	metro = strings.TrimPrefix(metro, "http://")
+	metro = strings.TrimPrefix(metro, "api.")
+	metro = strings.TrimSuffix(metro, "/v1")
+	metro = strings.TrimSuffix(metro, ".unikraft.cloud")
+	return strings.Trim(metro, "/")
+}
+
+// publicMetro is the label used in unikraft.app hostnames.
+// Short legacy ids such as fra become fra0. Full ids such as syd0-plausible-gnu stay as they are.
+func publicMetro(metro string) string {
+	metro = MetroID(metro)
+	if metro == "" {
+		return ""
+	}
+	if strings.Contains(metro, "-") || strings.ContainsAny(metro, "0123456789") {
+		return metro
+	}
+	return metro + "0"
+}
+
+func (d ServiceDomain) host(metro string) string {
+	host := strings.TrimSpace(d.FQDN)
+	if host == "" {
+		host = strings.TrimSpace(d.Name)
+	}
+	host = strings.TrimSuffix(host, ".")
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	if host == "" {
+		return ""
+	}
+	if !strings.Contains(host, ".") {
+		pm := publicMetro(metro)
+		if pm == "" {
+			return ""
+		}
+		return host + "." + pm + ".unikraft.app"
+	}
+	return host
+}
+
+// serviceGroupHost reports whether host is the unpublished service-group name.
+// Unikraft publishes {instance}.{metro}.unikraft.app. The group name
+// (small-tree-d1uu53wa) answers "There is no service on this URL."
+func serviceGroupHost(host, groupName, metro string) bool {
+	groupName = strings.TrimSpace(groupName)
+	if groupName == "" {
+		return false
+	}
+	host = strings.TrimSuffix(strings.TrimSpace(host), ".")
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	if host == groupName {
+		return true
+	}
+	for _, label := range []string{publicMetro(metro), MetroID(metro)} {
+		if label != "" && host == groupName+"."+label+".unikraft.app" {
+			return true
 		}
 	}
+	return false
+}
 
-	// Fallback (will probably 404 since port 443 is on the SG, not the instance)
-	if inst.FQDN != "" {
-		host := strings.TrimSuffix(inst.FQDN, ".")
-		if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+// publishedHost is the hostname that actually receives TLS on port 443.
+func publishedHost(inst Instance) string {
+	groupName := ""
+	if inst.ServiceGroup != nil {
+		groupName = inst.ServiceGroup.Name
+		for _, domain := range inst.ServiceGroup.Domains {
+			host := domain.host(inst.Metro)
+			if host == "" || serviceGroupHost(host, groupName, inst.Metro) {
+				continue
+			}
 			return host
 		}
-		return "https://" + host
 	}
-	if inst.Name != "" && inst.Metro != "" {
-		return fmt.Sprintf("https://%s.%s0.unikraft.app", inst.Name, inst.Metro)
+	if fqdn := strings.TrimSuffix(strings.TrimSpace(inst.FQDN), "."); fqdn != "" && !serviceGroupHost(fqdn, groupName, inst.Metro) {
+		fqdn = strings.TrimPrefix(fqdn, "https://")
+		fqdn = strings.TrimPrefix(fqdn, "http://")
+		if fqdn != "" {
+			return fqdn
+		}
+	}
+	name := strings.TrimSpace(inst.Name)
+	pm := publicMetro(inst.Metro)
+	if name != "" && pm != "" {
+		return name + "." + pm + ".unikraft.app"
 	}
 	return ""
+}
+
+func withScheme(host string) string {
+	if host == "" {
+		return ""
+	}
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return host
+	}
+	return "https://" + host
+}
+
+// InstanceHTTPSURL returns a public HTTPS base URL for health and agent calls.
+func InstanceHTTPSURL(inst Instance) string {
+	return withScheme(publishedHost(inst))
+}
+
+// needsServiceGroupRefresh is true when the create response has a service
+// group but no published domain yet. A non-empty domains list can still be
+// unusable when each entry leaves fqdn blank.
+func needsServiceGroupRefresh(inst Instance) bool {
+	if inst.ServiceGroup == nil || strings.TrimSpace(inst.ServiceGroup.UUID) == "" {
+		return false
+	}
+	groupName := inst.ServiceGroup.Name
+	for _, domain := range inst.ServiceGroup.Domains {
+		host := domain.host(inst.Metro)
+		if host != "" && !serviceGroupHost(host, groupName, inst.Metro) {
+			return false
+		}
+	}
+	return true
+}
+
+// ResolvePublicURL loads the service-group domain when the create response
+// omitted it, then returns the HTTPS origin used for /health and the worker contract.
+func ResolvePublicURL(ctx context.Context, cfg Config, inst Instance) (string, error) {
+	if strings.TrimSpace(inst.Metro) == "" {
+		inst.Metro = MetroID(cfg.Metro)
+	}
+	if needsServiceGroupRefresh(inst) {
+		sg, err := GetServiceGroup(ctx, cfg, inst.ServiceGroup.UUID)
+		if err == nil {
+			if strings.TrimSpace(sg.Name) == "" {
+				sg.Name = inst.ServiceGroup.Name
+			}
+			inst.ServiceGroup = &sg
+		}
+	}
+	url := InstanceHTTPSURL(inst)
+	if url == "" {
+		return "", fmt.Errorf("worker instance has no public URL")
+	}
+	return url, nil
 }

@@ -83,11 +83,8 @@ func (t *Create) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	if err != nil {
 		return "", err
 	}
-	if inst.Metro == "" {
-		inst.Metro = cfg.Metro
-	}
-	base := InstanceHTTPSURL(inst)
-	if base == "" {
+	base, err := ResolvePublicURL(ctx, cfg, inst)
+	if err != nil {
 		return "", fmt.Errorf("ukc_create: could not determine instance URL")
 	}
 

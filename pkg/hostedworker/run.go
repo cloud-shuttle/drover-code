@@ -125,14 +125,9 @@ func Run(ctx context.Context, in RunInput) (RunOutput, error) {
 		_ = cleanupInstance(cleanupCtx, cfg, inst.UUID)
 	}()
 
-	if inst.ServiceGroup != nil && inst.ServiceGroup.UUID != "" && len(inst.ServiceGroup.Domains) == 0 {
-		if sg, err := ukc.GetServiceGroup(ctx, cfg, inst.ServiceGroup.UUID); err == nil {
-			inst.ServiceGroup = &sg
-		}
-	}
-	baseURL := ukc.InstanceHTTPSURL(inst)
-	if baseURL == "" {
-		return RunOutput{}, fmt.Errorf("worker instance has no public URL")
+	baseURL, err := ukc.ResolvePublicURL(ctx, cfg, inst)
+	if err != nil {
+		return RunOutput{}, err
 	}
 
 	if in.DownloadDir != "" {
