@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/cloud-shuttle/drover-code/internal/agent"
-	"github.com/cloud-shuttle/drover-code/pkg/sessionevent"
+	"github.com/cloud-shuttle/drover-libs/pkg/sessionevent"
 )
 
 func TestReleaseBackgroundCallsHook(t *testing.T) {

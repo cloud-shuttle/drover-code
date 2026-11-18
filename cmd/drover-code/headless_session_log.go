@@ -5,7 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cloud-shuttle/drover-code/internal/agent"
-	"github.com/cloud-shuttle/drover-code/pkg/sessionevent"
+	"github.com/cloud-shuttle/drover-libs/pkg/sessionevent"
 )
 
 // headlessSession is set for the life of runHeadless so the event drains
