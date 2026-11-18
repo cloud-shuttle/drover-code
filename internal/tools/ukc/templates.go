@@ -195,8 +195,8 @@ func (t *BuildTemplate) Execute(ctx context.Context, raw json.RawMessage) (strin
 		return "", fmt.Errorf("ukc_build_template: failed to create base instance: %w", err)
 	}
 
-	base := InstanceHTTPSURL(inst)
-	if base == "" {
+	base, err := ResolvePublicURL(ctx, cfg, inst)
+	if err != nil {
 		_ = DeleteInstance(context.Background(), cfg, inst.UUID)
 		return "", fmt.Errorf("ukc_build_template: could not determine instance URL")
 	}

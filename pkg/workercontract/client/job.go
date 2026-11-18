@@ -56,16 +56,8 @@ func RunAgentJob(ctx context.Context, cfg ukc.Config, spec JobSpec) (JobResult, 
 		return JobResult{}, fmt.Errorf("create instance: %w", err)
 	}
 
-	// Fetch the complete Service Group object to get the Domains if they aren't included inline
-	if inst.ServiceGroup != nil && inst.ServiceGroup.UUID != "" && len(inst.ServiceGroup.Domains) == 0 {
-		sg, err := ukc.GetServiceGroup(ctx, cfg, inst.ServiceGroup.UUID)
-		if err == nil {
-			inst.ServiceGroup = &sg
-		}
-	}
-
-	instURL := ukc.InstanceHTTPSURL(inst)
-	if instURL == "" {
+	instURL, err := ukc.ResolvePublicURL(ctx, cfg, inst)
+	if err != nil {
 		_ = ukc.DeleteInstance(context.Background(), cfg, inst.UUID)
 		return JobResult{}, fmt.Errorf("empty instance URL for instance %s", inst.Name)
 	}

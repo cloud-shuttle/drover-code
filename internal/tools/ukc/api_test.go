@@ -48,12 +48,54 @@ func TestInstanceHTTPSURL_prefersDomain(t *testing.T) {
 		Name:  "x",
 		Metro: "fra",
 		ServiceGroup: &ServiceGroup{
-			Domains: []struct {
-				FQDN string `json:"fqdn"`
-			}{{FQDN: "custom.example.com."}},
+			Domains: []ServiceDomain{{FQDN: "custom.example.com."}},
 		},
 	})
 	if u != "https://custom.example.com" {
+		t.Fatalf("got %q", u)
+	}
+}
+
+func TestInstanceHTTPSURL_usesDomainNameWhenFQDNBlank(t *testing.T) {
+	u := InstanceHTTPSURL(Instance{
+		Name:  "drover-hosted-aj",
+		Metro: "syd0-plausible-gnu",
+		FQDN:  "small-tree-d1uu53wa.syd0-plausible-gnu.unikraft.app",
+		ServiceGroup: &ServiceGroup{
+			Name: "small-tree-d1uu53wa",
+			Domains: []ServiceDomain{{
+				Name: "drover-hosted-aj.syd0-plausible-gnu.unikraft.app",
+			}},
+		},
+	})
+	if u != "https://drover-hosted-aj.syd0-plausible-gnu.unikraft.app" {
+		t.Fatalf("got %q", u)
+	}
+}
+
+func TestInstanceHTTPSURL_skipsServiceGroupName(t *testing.T) {
+	u := InstanceHTTPSURL(Instance{
+		Name:  "drover-hosted-aj-1795005027246934169",
+		Metro: "https://api.syd0-plausible-gnu.unikraft.cloud",
+		FQDN:  "small-tree-d1uu53wa.syd0-plausible-gnu.unikraft.app",
+		ServiceGroup: &ServiceGroup{
+			Name: "small-tree-d1uu53wa",
+			Domains: []ServiceDomain{{
+				FQDN: "small-tree-d1uu53wa.syd0-plausible-gnu.unikraft.app",
+			}},
+		},
+	})
+	if u != "https://drover-hosted-aj-1795005027246934169.syd0-plausible-gnu.unikraft.app" {
+		t.Fatalf("got %q", u)
+	}
+}
+
+func TestInstanceHTTPSURL_sydneyMetroKeepsFullID(t *testing.T) {
+	u := InstanceHTTPSURL(Instance{
+		Name:  "drover-hosted-aj",
+		Metro: "syd0-plausible-gnu",
+	})
+	if u != "https://drover-hosted-aj.syd0-plausible-gnu.unikraft.app" {
 		t.Fatalf("got %q", u)
 	}
 }
