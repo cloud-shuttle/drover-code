@@ -52,7 +52,12 @@ type createInstanceBody struct {
 }
 
 type createInstanceServiceGroup struct {
-	Services []apiService `json:"services"`
+	Services []apiService           `json:"services"`
+	Domains  []createInstanceDomain `json:"domains,omitempty"`
+}
+
+type createInstanceDomain struct {
+	Name string `json:"name"`
 }
 
 type apiService struct {
@@ -120,6 +125,9 @@ func CreateInstance(ctx context.Context, cfg Config, name, image string, memoryM
 				DestinationPort: agentListenPort,
 				Handlers:        []string{"tls", "http"},
 			}},
+			// A bare name becomes {name}.{metro}.unikraft.app. Without it the
+			// edge answers "There is no service on this URL."
+			Domains: []createInstanceDomain{{Name: name}},
 		},
 	}
 	if memoryMB > 0 {
