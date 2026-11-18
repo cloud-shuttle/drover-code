@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/tools"
-	fspkg "github.com/cloudshuttle/drover-code/internal/tools/fs"
-	gitpkg "github.com/cloudshuttle/drover-code/internal/tools/git"
-	searchpkg "github.com/cloudshuttle/drover-code/internal/tools/search"
-	shellpkg "github.com/cloudshuttle/drover-code/internal/tools/shell"
-	webpkg "github.com/cloudshuttle/drover-code/internal/tools/web"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
+	fspkg "github.com/cloud-shuttle/drover-code/internal/tools/fs"
+	gitpkg "github.com/cloud-shuttle/drover-code/internal/tools/git"
+	searchpkg "github.com/cloud-shuttle/drover-code/internal/tools/search"
+	shellpkg "github.com/cloud-shuttle/drover-code/internal/tools/shell"
+	webpkg "github.com/cloud-shuttle/drover-code/internal/tools/web"
 )
 
 const (

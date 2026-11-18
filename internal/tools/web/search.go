@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
+	"github.com/cloud-shuttle/drover-code/internal/tools/toolutil"
 )
 
 // Search queries the public web and returns titles, URLs, and snippets.

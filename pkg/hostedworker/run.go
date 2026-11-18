@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/internal/workerclient"
+	"github.com/cloud-shuttle/drover-code/internal/tools/ukc"
+	"github.com/cloud-shuttle/drover-code/internal/workerclient"
 )
 
 // RunInput configures one hosted worker contract execution.

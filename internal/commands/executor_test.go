@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/config"
-	"github.com/cloudshuttle/drover-code/pkg/guardclient"
+	"github.com/cloud-shuttle/drover-code/internal/config"
+	"github.com/cloud-shuttle/drover-code/pkg/guardclient"
 )
 
 func TestExecutor_E2E(t *testing.T) {

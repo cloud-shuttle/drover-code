@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
+	"github.com/cloud-shuttle/drover-code/internal/tools/ukc"
+	"github.com/cloud-shuttle/drover-code/pkg/workercontract/workspace"
 )
 
 // JobSpec describes a full worker contract execution lifecycle.
@@ -126,7 +126,7 @@ func RunAgentJob(ctx context.Context, cfg ukc.Config, spec JobSpec) (JobResult, 
 	if err != nil {
 		return JobResult{Output: outStr, ExitCode: exitCode}, fmt.Errorf("worker exec: %w", err)
 	}
-	
+
 	if spec.DownloadDir != "" {
 		if spec.OnEvent != nil {
 			spec.OnEvent("Task complete. Downloading modified workspace...")

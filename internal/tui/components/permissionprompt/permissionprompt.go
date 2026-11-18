@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
-	"github.com/cloudshuttle/drover-code/internal/tui/styles"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/tui/styles"
 )
 
 // PermissionPrompt is the component for a single tool permission request.

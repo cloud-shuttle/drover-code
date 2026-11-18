@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
 )
 
 const headlessResultSchemaVersion = 1

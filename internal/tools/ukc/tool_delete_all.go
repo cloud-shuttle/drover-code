@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
+	"github.com/cloud-shuttle/drover-code/internal/tools/toolutil"
 )
 
 // DeleteAll removes every instance listed in the registry from Kraft Cloud and clears the file.

@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
-	"github.com/cloudshuttle/drover-code/internal/config"
-	"github.com/cloudshuttle/drover-code/internal/coordinator"
-	"github.com/cloudshuttle/drover-code/internal/permissions"
-	"github.com/cloudshuttle/drover-code/internal/tools"
-	"github.com/cloudshuttle/drover-code/internal/undercover"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/config"
+	"github.com/cloud-shuttle/drover-code/internal/coordinator"
+	"github.com/cloud-shuttle/drover-code/internal/permissions"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/undercover"
 )
 
 func TestHeadlessExitCode_mapping(t *testing.T) {

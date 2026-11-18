@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
+	"github.com/cloud-shuttle/drover-code/internal/tools/ukc"
 )
 
 func TestInstanceEnv_JobKeyWinsOverHost(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/api"
 	"pgregory.net/rapid"
 )
 
@@ -98,4 +98,3 @@ func TestProperty_ResetClearsHistory(t *testing.T) {
 		}
 	})
 }
-

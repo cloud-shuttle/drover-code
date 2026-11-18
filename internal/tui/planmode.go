@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/permissions"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/permissions"
 )
 
 const planModePrompt = "\n\nPlan mode is on. Do not call write_file, edit_file, bash, or any tool that changes the workspace. read_file, list_directory, file_info, glob, grep, explore, and write_plan still run. Shift+Tab leaves plan mode."

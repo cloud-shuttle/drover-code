@@ -6,7 +6,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/api"
 )
 
 const (

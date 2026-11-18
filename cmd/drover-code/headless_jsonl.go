@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
 )
 
 // drainHeadlessJSONL writes one JSON object per line to stdout for each agent

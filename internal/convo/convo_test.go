@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/api"
 )
 
 func TestManager_CharsPerToken(t *testing.T) {

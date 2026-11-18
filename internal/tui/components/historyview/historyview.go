@@ -8,8 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cloudshuttle/drover-code/internal/tui/core"
-	"github.com/cloudshuttle/drover-code/internal/tui/styles"
+	"github.com/cloud-shuttle/drover-code/internal/tui/core"
+	"github.com/cloud-shuttle/drover-code/internal/tui/styles"
 )
 
 var (

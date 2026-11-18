@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/tui/styles"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/tui/styles"
 )
 
 // ApplyConvoHeuristics sets context limit and chars-per-token on mgr from

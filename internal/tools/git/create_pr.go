@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/quality"
-	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
+	"github.com/cloud-shuttle/drover-code/internal/tools/quality"
+	"github.com/cloud-shuttle/drover-code/internal/tools/toolutil"
 	"github.com/google/go-github/v62/github"
 )
 

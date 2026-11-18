@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/config"
+	"github.com/cloud-shuttle/drover-code/internal/config"
 )
 
 func runCloudMode(ctx context.Context, workDir string, settings config.Settings) {

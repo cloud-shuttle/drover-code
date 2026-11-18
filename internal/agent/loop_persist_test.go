@@ -5,11 +5,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/session"
-	"github.com/cloudshuttle/drover-code/internal/telemetry"
-	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/session"
+	"github.com/cloud-shuttle/drover-code/internal/telemetry"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
 )
 
 type scriptedDriver struct {

@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	liveregion "github.com/cloudshuttle/drover-code/internal/tui/components/liveregion"
+	liveregion "github.com/cloud-shuttle/drover-code/internal/tui/components/liveregion"
 )
 
 // SessionRow is one line in the resume picker.

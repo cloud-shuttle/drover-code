@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
+	"github.com/cloud-shuttle/drover-code/internal/tools/toolutil"
 )
 
 const maxSkills = 40

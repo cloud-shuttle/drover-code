@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cloudshuttle/drover-code/internal/warden"
-	"github.com/cloudshuttle/drover-code/pkg/guardclient"
+	"github.com/cloud-shuttle/drover-code/internal/warden"
+	"github.com/cloud-shuttle/drover-code/pkg/guardclient"
 )
 
 type Executor struct {

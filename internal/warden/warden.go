@@ -12,7 +12,7 @@ import (
 	otellog "go.opentelemetry.io/otel/log"
 	otellogglobal "go.opentelemetry.io/otel/log/global"
 
-	"github.com/cloudshuttle/drover-code/internal/telemetry"
+	"github.com/cloud-shuttle/drover-code/internal/telemetry"
 )
 
 var (

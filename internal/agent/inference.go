@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/telemetry"
+	"github.com/cloud-shuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/telemetry"
 )
 
 // SemanticEvent represents a high-level intent or chunk yielded by the inference engine.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
+	"github.com/cloud-shuttle/drover-code/internal/tools/toolutil"
 )
 
 // Exec runs a shell command on the remote agent and returns combined logs + exit code.

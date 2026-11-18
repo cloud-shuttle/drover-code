@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/api"
 )
 
 // envTruthy reports whether an environment variable is set to a common

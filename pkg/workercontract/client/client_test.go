@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/pkg/workercontract/client"
-	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
+	"github.com/cloud-shuttle/drover-code/pkg/workercontract/client"
+	"github.com/cloud-shuttle/drover-code/pkg/workercontract/workspace"
 )
 
 func TestNew_TrimsBaseURL(t *testing.T) {

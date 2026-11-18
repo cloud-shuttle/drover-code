@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/gopls"
-	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
+	"github.com/cloud-shuttle/drover-code/internal/tools/gopls"
+	"github.com/cloud-shuttle/drover-code/internal/tools/toolutil"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 

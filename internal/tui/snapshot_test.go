@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
-	"github.com/cloudshuttle/drover-code/internal/tui/core"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/tui/core"
 )
 
 // assertSnapshot compares the actual output with the stored golden file.

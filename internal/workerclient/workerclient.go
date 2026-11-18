@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
+	"github.com/cloud-shuttle/drover-code/internal/tools/ukc"
 )
 
 // Client holds the connection parameters for a single worker instance.

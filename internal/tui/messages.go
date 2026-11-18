@@ -3,7 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
 )
 
 type agentMsg struct {

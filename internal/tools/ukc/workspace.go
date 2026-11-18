@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
+	"github.com/cloud-shuttle/drover-code/pkg/workercontract/workspace"
 )
 
 // UploadWorkspace streams a tar.gz of the local directory to the UKC agent's /workspace endpoint.

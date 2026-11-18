@@ -3,7 +3,7 @@ package tui
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cloudshuttle/drover-code/internal/tui/styles"
+	"github.com/cloud-shuttle/drover-code/internal/tui/styles"
 )
 
 // Re-export central colors for use inside the tui package (maintains existing lowercase names)

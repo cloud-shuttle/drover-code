@@ -13,12 +13,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/telemetry"
-	"github.com/cloudshuttle/drover-code/internal/tools"
-	"github.com/cloudshuttle/drover-code/internal/warden"
-	"github.com/cloudshuttle/drover-code/pkg/outcomesignal"
+	"github.com/cloud-shuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/telemetry"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/warden"
+	"github.com/cloud-shuttle/drover-code/pkg/outcomesignal"
 )
 
 const (

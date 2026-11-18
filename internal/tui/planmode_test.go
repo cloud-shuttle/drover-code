@@ -6,9 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/permissions"
-	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/permissions"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
 )
 
 func TestShiftTabTogglesPlanMode(t *testing.T) {

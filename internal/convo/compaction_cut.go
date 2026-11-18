@@ -3,7 +3,7 @@ package convo
 import (
 	"fmt"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/api"
 )
 
 // CompactionCutPoint returns the slice index where summarisation should start:

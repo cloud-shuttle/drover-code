@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cloudshuttle/drover-code/internal/tui/styles"
+	"github.com/cloud-shuttle/drover-code/internal/tui/styles"
 )
 
 // ToolSpinner is a small reusable component for showing an active tool call

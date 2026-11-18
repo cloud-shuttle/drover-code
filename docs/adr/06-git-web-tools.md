@@ -481,7 +481,7 @@ Delta compression using up to 10 threads
 Compressing objects: 100% (3/3), done.
 Writing objects: 100% (3/3), 789 bytes | 789.00 KiB/s, done.
 Total 3 (delta 1), reused 0 (delta 0), pack-reused 0
-To github.com:cloudshuttle/drover-code.git
+To github.com:cloud-shuttle/drover-code.git
    abc1234..def5678  main -> main
 ```
 

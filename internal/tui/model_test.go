@@ -11,10 +11,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
-	"github.com/cloudshuttle/drover-code/internal/api"
-	"github.com/cloudshuttle/drover-code/internal/tui/commandpalette"
-	"github.com/cloudshuttle/drover-code/internal/tui/core"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/tui/commandpalette"
+	"github.com/cloud-shuttle/drover-code/internal/tui/core"
 )
 
 func init() {

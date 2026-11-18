@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
+	"github.com/cloud-shuttle/drover-code/internal/tools/ukc"
+	"github.com/cloud-shuttle/drover-code/pkg/workercontract/workspace"
 )
 
 // Client talks to a worker runtime over the shared worker contract HTTP API.

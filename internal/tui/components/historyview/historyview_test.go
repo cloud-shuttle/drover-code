@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/tui/core"
+	"github.com/cloud-shuttle/drover-code/internal/tui/core"
 )
 
 func TestHistoryView_SetSize(t *testing.T) {

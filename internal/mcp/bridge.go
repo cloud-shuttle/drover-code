@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/config"
-	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/config"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
 )
 
 // Caller is the MCP transport (stdio or HTTP).

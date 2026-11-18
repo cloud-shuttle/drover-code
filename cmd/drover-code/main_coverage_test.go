@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cloudshuttle/drover-code/internal/config"
-	"github.com/cloudshuttle/drover-code/internal/permissions"
-	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/config"
+	"github.com/cloud-shuttle/drover-code/internal/permissions"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
 )
 
 func TestParseCSVEnv(t *testing.T) {

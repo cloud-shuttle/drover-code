@@ -16,17 +16,17 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/cloudshuttle/drover-code/internal/agent"
-	"github.com/cloudshuttle/drover-code/internal/api"
-	"github.com/cloudshuttle/drover-code/internal/config"
-	"github.com/cloudshuttle/drover-code/internal/harness"
-	"github.com/cloudshuttle/drover-code/internal/convo"
-	"github.com/cloudshuttle/drover-code/internal/permissions"
-	"github.com/cloudshuttle/drover-code/internal/telemetry"
-	"github.com/cloudshuttle/drover-code/internal/tools"
-	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/pkg/workercontract/client"
-	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
+	"github.com/cloud-shuttle/drover-code/internal/agent"
+	"github.com/cloud-shuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/config"
+	"github.com/cloud-shuttle/drover-code/internal/convo"
+	"github.com/cloud-shuttle/drover-code/internal/harness"
+	"github.com/cloud-shuttle/drover-code/internal/permissions"
+	"github.com/cloud-shuttle/drover-code/internal/telemetry"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/tools/ukc"
+	"github.com/cloud-shuttle/drover-code/pkg/workercontract/client"
+	"github.com/cloud-shuttle/drover-code/pkg/workercontract/workspace"
 )
 
 const maxCoordinatorSubtasks = 8

@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cloudshuttle/drover-code/internal/tools/gopls"
-	"github.com/cloudshuttle/drover-code/internal/tools/toolutil"
+	"github.com/cloud-shuttle/drover-code/internal/tools/gopls"
+	"github.com/cloud-shuttle/drover-code/internal/tools/toolutil"
 )
 
 // WriteFile creates or completely overwrites a file.

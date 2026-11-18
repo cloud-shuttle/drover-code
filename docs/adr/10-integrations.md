@@ -718,7 +718,7 @@ func (r *Runner) run(ctx context.Context, trigger *Trigger) (string, error) {
     // ... clone, agent, collect output ...
     resp := strings.TrimSpace(output.String())
     if resp == "" { resp = "_No response generated._" }
-    return resp + "\n\n---\n_via [drover-code](https://github.com/cloudshuttle/drover-code)_", nil
+    return resp + "\n\n---\n_via [drover-code](https://github.com/cloud-shuttle/drover-code)_", nil
 }
 ```
 

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudshuttle/drover-code/internal/tui/components/toolspinner"
+	"github.com/cloud-shuttle/drover-code/internal/tui/components/toolspinner"
 )
 
 func TestLiveRegion_View(t *testing.T) {

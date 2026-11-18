@@ -6,7 +6,7 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/cloudshuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
 )
 
 // Property: with ModeDefault, anything in deniedTools is denied before allow-list

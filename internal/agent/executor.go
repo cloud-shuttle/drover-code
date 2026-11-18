@@ -8,12 +8,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/cloudshuttle/drover-code/internal/api"
-	"github.com/cloudshuttle/drover-code/internal/harness"
-	"github.com/cloudshuttle/drover-code/internal/permissions"
-	"github.com/cloudshuttle/drover-code/internal/telemetry"
-	"github.com/cloudshuttle/drover-code/internal/tools"
-	"github.com/cloudshuttle/drover-code/internal/warden"
+	"github.com/cloud-shuttle/drover-code/internal/api"
+	"github.com/cloud-shuttle/drover-code/internal/harness"
+	"github.com/cloud-shuttle/drover-code/internal/permissions"
+	"github.com/cloud-shuttle/drover-code/internal/telemetry"
+	"github.com/cloud-shuttle/drover-code/internal/tools"
+	"github.com/cloud-shuttle/drover-code/internal/warden"
 )
 
 type ToolExecutor interface {
