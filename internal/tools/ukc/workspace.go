@@ -11,16 +11,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cloudshuttle/drover-code/internal/workspace"
+	"github.com/cloudshuttle/drover-code/pkg/workercontract/workspace"
 )
 
 // UploadWorkspace streams a tar.gz of the local directory to the UKC agent's /workspace endpoint.
 func UploadWorkspace(ctx context.Context, cfg Config, inst Instance, localDir string, agentToken string) error {
-	return UploadWorkspaceWithLimits(ctx, cfg, inst, localDir, agentToken, workspace.DefaultWorkspaceLimits())
+	return UploadWorkspaceWithLimits(ctx, cfg, inst, localDir, agentToken, workspace.DefaultLimits())
 }
 
 // UploadWorkspaceWithLimits applies workspace exclusion and size caps before upload.
-func UploadWorkspaceWithLimits(ctx context.Context, cfg Config, inst Instance, localDir, agentToken string, limits workspace.WorkspaceLimits) error {
+func UploadWorkspaceWithLimits(ctx context.Context, cfg Config, inst Instance, localDir, agentToken string, limits workspace.Limits) error {
 	return UploadWorkspaceAt(ctx, cfg.HTTPClient, InstanceHTTPSURL(inst), agentToken, localDir, limits)
 }
 
@@ -50,9 +50,11 @@ func uploadWorkspaceStream(ctx context.Context, client *http.Client, baseURL, ag
 }
 
 // UploadWorkspaceAt uploads localDir to the worker runtime at baseURL.
-func UploadWorkspaceAt(ctx context.Context, client *http.Client, baseURL, agentToken, localDir string, limits workspace.WorkspaceLimits) error {
-	limits = limits.Normalize()
-	filter, err := workspace.NewWorkspaceFilter(localDir)
+func UploadWorkspaceAt(ctx context.Context, client *http.Client, baseURL, agentToken, localDir string, limits workspace.Limits) error {
+	if limits.MaxFileBytes <= 0 || limits.MaxTotalBytes <= 0 {
+		limits = workspace.DefaultLimits()
+	}
+	filter, err := workspace.NewFilter(localDir)
 	if err != nil {
 		return err
 	}

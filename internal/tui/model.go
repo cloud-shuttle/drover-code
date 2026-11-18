@@ -1155,7 +1155,7 @@ func (m *Model) tokensInfoText() string {
 
 func (m *Model) modelInfoText() string {
 	return strings.TrimSpace(fmt.Sprintf(
-		"(/model) Active model: %s\nTheme: palette=%s mode=%s (Ctrl+K → Theme or /theme <palette> <mode>)\nCustom overrides: Settings.Theme.Colors in .claude/settings.json",
+		"(/model) Active model: %s\nTheme: palette=%s mode=%s (Ctrl+K → Theme or /theme <palette> <mode>)\nCustom overrides: Settings.Theme.Colors in .drover/settings.json",
 		m.modelName,
 		styles.CurrentTheme.Name,
 		CurrentThemeMode,

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/cloudshuttle/drover-code/internal/tools/ukc"
-	"github.com/cloudshuttle/drover-code/internal/workspace"
+	"github.com/cloudshuttle/drover-code/internal/workerclient"
 )
 
 // RunInput configures one hosted worker contract execution.
@@ -139,18 +139,18 @@ func Run(ctx context.Context, in RunInput) (RunOutput, error) {
 		_ = os.RemoveAll(in.DownloadDir)
 	}
 
-	client := ukc.New(baseURL, token, cfg.HTTPClient)
+	client := workerclient.New(baseURL, token, cfg.HTTPClient)
 	safePrompt := strings.ReplaceAll(in.Prompt, "'", "'\\''")
 	command := fmt.Sprintf("drover-code --headless --prompt '%s'", safePrompt)
 
-	result, err := ukc.RunContract(ctx, client, ukc.ContractSpec{
+	result, err := workerclient.RunContract(ctx, client, workerclient.ContractSpec{
 		WorkDir:       in.WorkDir,
 		DownloadDir:   in.DownloadDir,
 		Command:       command,
-		Limits:        workspace.DefaultWorkspaceLimits(),
 		OnStreamLine:  in.OnStreamLine,
 		MaxHealthWait: 90 * time.Second,
 	})
+
 	if err != nil {
 		_ = emitIfPossible(in.OnStreamLine, "status", fmt.Sprintf(`{"event":"ukc_instance_lifecycle","phase":"destroyed","uuid":"%s","ended_at":"%s","reason":"error"}`, inst.UUID, time.Now().UTC().Format(time.RFC3339)))
 		return RunOutput{Output: result.Output}, err
