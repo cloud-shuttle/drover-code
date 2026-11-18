@@ -19,12 +19,14 @@ import (
 	"github.com/cloud-shuttle/drover-code/internal/agent"
 	"github.com/cloud-shuttle/drover-code/internal/api"
 	"github.com/cloud-shuttle/drover-code/internal/config"
+	"github.com/cloud-shuttle/drover-code/internal/harness"
 	"github.com/cloud-shuttle/drover-code/internal/convo"
 	"github.com/cloud-shuttle/drover-code/internal/permissions"
 	"github.com/cloud-shuttle/drover-code/internal/telemetry"
 	"github.com/cloud-shuttle/drover-code/internal/tools"
 	"github.com/cloud-shuttle/drover-code/internal/tools/ukc"
-	"github.com/cloud-shuttle/drover-code/internal/workspace"
+	"github.com/cloud-shuttle/drover-code/pkg/workercontract/client"
+	"github.com/cloud-shuttle/drover-code/pkg/workercontract/workspace"
 )
 
 const maxCoordinatorSubtasks = 8
@@ -57,6 +59,10 @@ type Coordinator struct {
 	settings   config.Settings
 	MaxWorkers int
 	gitMu      sync.Mutex
+	// Lineage is the trusted parent identity for worker spawns.
+	Lineage agent.Lineage
+	// Policy clamps MaxAgentTiers (repo may tighten, never raise past operator ceiling).
+	Policy agent.Policy
 }
 
 func New(client *api.Client, registry *tools.Registry, workDir string, eventCh chan<- agent.Event, settings config.Settings) *Coordinator {
@@ -77,6 +83,10 @@ func (c *Coordinator) Execute(ctx context.Context, task string) (string, error) 
 
 func (c *Coordinator) ExecuteWithResults(ctx context.Context, task string) (ExecuteOutcome, error) {
 	var z ExecuteOutcome
+
+	if c.Policy.MaxAgentTiers == 0 && c.settings.MaxAgentTiers > 0 {
+		c.Policy.MaxAgentTiers = c.settings.MaxAgentTiers
+	}
 
 	c.eventCh <- agent.TextDeltaEvent{Text: "Decomposing task into subtasks via Anthropic API...\n"}
 
@@ -254,6 +264,20 @@ func (c *Coordinator) executeWorkers(ctx context.Context, subtasks []Subtask) ([
 }
 
 func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, error) {
+	policy := c.Policy
+	if policy.MaxAgentTiers == 0 {
+		policy.MaxAgentTiers = agent.OperatorMaxAgentTiers
+	}
+	parent := c.Lineage
+	if !parent.Trusted {
+		// Trusted ingress should have set lineage; mint a local root for interactive coordinator.
+		parent = agent.NewRootLineage("coordinator", "coordinator-root", c.workDir, "", time.Time{}, 0)
+	}
+	if err := agent.AdmitSpawn(parent, policy); err != nil {
+		return WorkerResult{Index: st.Index, Task: st.Description, Output: err.Error(), IsError: true}, err
+	}
+	childLin := parent.Child(fmt.Sprintf("worker-%d", st.Index))
+
 	workerMgr := convo.NewManagerWithSystem(workerSystemPrompt(st.Description))
 	config.ApplyConvoHeuristics(workerMgr, c.settings)
 
@@ -274,6 +298,20 @@ func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, 
 
 	workerDriver := agent.NewAnthropicInferenceDriver(c.client)
 	workerExecutor := agent.NewDefaultToolExecutor(reg, permissions.NewEngine(permissions.ModeBypass, nil, nil, "", tools.AllowAll), workerEvents)
+	gate := harness.NewGate(repoMount)
+	gate.RequireForHeadless = true
+	// Workers inherit approved-spec binding from parent lineage when present.
+	if childLin.ApprovedSpec != "" && childLin.Scope != "" {
+		_ = gate.Accept(harness.Spec{
+			TaskID:      "coord-" + childLin.RootID,
+			WorkSize:    harness.WorkSmall,
+			SkipReason:  "coordinator worker bound to parent approved_spec_hash=" + childLin.ApprovedSpec,
+			Approver:    "coordinator:" + childLin.ParentID,
+			ContentHash: childLin.ApprovedSpec,
+			Boundaries:  []string{childLin.Scope},
+		})
+	}
+	workerExecutor.SetGate(gate)
 	workerLoop := agent.NewLoop(
 		workerDriver,
 		workerMgr,
@@ -281,6 +319,7 @@ func (c *Coordinator) runWorker(ctx context.Context, st Subtask) (WorkerResult, 
 		reg,
 		workerEvents,
 	)
+	workerLoop.SetLineage(childLin)
 	config.ApplyAgentLoopOptions(workerLoop, c.settings)
 
 	var output strings.Builder
@@ -376,17 +415,11 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 	}
 
 	name := fmt.Sprintf("drover-worker-%d-%d", st.Index, time.Now().Unix())
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Provisioning UKC instance %s...\n", st.Index+1, name)}
 
-	// Create instance
-	token, _ := ukc.RandToken()
-	cfg := mgr.Config()
 	env := map[string]string{
-		"AGENT_TOKEN":                   token,
 		"DROVER_CODE_HEADLESS":          "1",
 		"DROVER_CODE_PERMISSION_PRESET": "unikernel",
 	}
-	// Forward LLM API keys and configuration to the remote workers
 	for _, k := range []string{
 		"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
 		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
@@ -398,56 +431,13 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 		}
 	}
 
-	img := cfg.DefaultImage
+	img := mgr.Config().DefaultImage
 	if customImage != "" {
 		img = customImage
 	}
 
-	var wc ukc.Client
-	err = wc.Provision(ctx, cfg, name, img, 512, env)
-	if err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
-	}
-
-	// Always cleanup worker instance (ADR 0003 instance lifecycle).
-	defer func() {
-		_ = ukc.UnregisterActiveJob(wc.Inst.UUID)
-		if err := wc.Destroy(context.Background()); err != nil {
-			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to destroy UKC instance %s: %v\n", st.Index+1, name, err)}
-		} else {
-			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Destroyed UKC instance %s\n", st.Index+1, name)}
-		}
-	}()
-	_ = ukc.RegisterActiveJob(wc.Inst.UUID, name)
-
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance created, waiting for health check at %s...\n", st.Index+1, wc.BaseURL)}
-
-	if err := wc.WaitReady(ctx, cfg.MaxHealthWait); err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "instance health timeout: " + err.Error()}, err
-	}
-
-	baseSHA, _ := gitHeadSHA(ctx, c.workDir)
-	if baseSHA != "" {
-		short := baseSHA
-		if len(short) > 8 {
-			short = short[:8]
-		}
-		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Base SHA: %s\n", st.Index+1, short)}
-	}
-
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Uploading local workspace to cloud instance...\n", st.Index+1)}
-	summary, err := workspace.PlanWorkspaceUpload(c.workDir, workspace.DefaultWorkspaceLimits())
-	if err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "workspace plan: " + err.Error()}, err
-	}
-	if err := ukc.MaybeConfirmUpload(os.Stdin, os.Stdout, summary); err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
-	}
-	if err := wc.UploadWorkspace(ctx, c.workDir, workspace.DefaultWorkspaceLimits()); err != nil {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: "upload workspace failed: " + err.Error()}, err
-	}
-
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Instance ready, executing headless task...\n", st.Index+1)}
+	downloadDir := filepath.Join(st.IsolatedDir, "workspace_downloaded")
+	_ = os.RemoveAll(downloadDir)
 
 	safeTask := strings.ReplaceAll(st.Description, "'", "'\\''")
 	command := fmt.Sprintf("drover-code --headless --prompt '%s'", safeTask)
@@ -470,38 +460,54 @@ func (c *Coordinator) runWorkerRemote(ctx context.Context, st Subtask, customIma
 			typ, _ := ev["type"].(string)
 			switch typ {
 			case "tool_start":
-				name, _ := ev["name"].(string)
-				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🔨 using tool: %s\n", st.Index+1, name)}
+				toolName, _ := ev["name"].(string)
+				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🔨 using tool: %s\n", st.Index+1, toolName)}
 			case "heartbeat":
 				turn, _ := ev["turn"].(float64)
 				c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("[worker %d] 🧠 thinking... (turn %d)\n", st.Index+1, int(turn))}
 			}
 		}
 	}
-	outStr, exitCode, err := wc.Exec(ctx, command, onLine)
+
+	baseSHA, _ := gitHeadSHA(ctx, c.workDir)
+	if baseSHA != "" {
+		short := baseSHA
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Base SHA: %s\n", st.Index+1, short)}
+	}
+
+	res, err := client.RunAgentJob(ctx, mgr.Config(), client.JobSpec{
+		Name:        name,
+		Image:       img,
+		MemoryMB:    512,
+		Env:         env,
+		Command:     command,
+		WorkDir:     c.workDir,
+		DownloadDir: downloadDir,
+		Limits:      workspace.DefaultLimits(),
+		OnEvent: func(msg string) {
+			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] %s\n", st.Index+1, msg)}
+		},
+		OnStreamLine: onLine,
+	})
 
 	if err != nil {
 		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: err.Error()}, err
 	}
-	if exitCode != 0 {
-		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: outStr}, fmt.Errorf("remote task exited with %d", exitCode)
+	if res.ExitCode != 0 {
+		return WorkerResult{Index: st.Index, Task: st.Description, IsError: true, Output: res.Output}, fmt.Errorf("remote task exited with %d", res.ExitCode)
 	}
 
-	c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] Task complete. Downloading modified workspace...\n", st.Index+1)}
-	downloadDir := filepath.Join(st.IsolatedDir, "workspace_downloaded")
-	_ = os.RemoveAll(downloadDir)
-	if err := wc.DownloadWorkspace(ctx, downloadDir); err != nil {
-		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to download workspace: %v\n", st.Index+1, err)}
-	} else {
-		if err := c.syncDownloadedWorkspace(ctx, st, downloadDir, baseSHA); err != nil {
-			c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to merge workspace: %v\n", st.Index+1, err)}
-		}
+	if err := c.syncDownloadedWorkspace(ctx, st, downloadDir, baseSHA); err != nil {
+		c.eventCh <- agent.TextDeltaEvent{Text: fmt.Sprintf("\n[worker %d] ⚠️ Failed to merge workspace: %v\n", st.Index+1, err)}
 	}
 
 	return WorkerResult{
 		Index:  st.Index,
 		Task:   st.Description,
-		Output: outStr,
+		Output: res.Output,
 	}, nil
 }
 
