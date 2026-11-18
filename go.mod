@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.2.4
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/charmbracelet/lipgloss v1.0.0
-	github.com/cloud-shuttle/drover-libs v0.1.1-0.20261117234455-1a4ba2e6aa5a
+	github.com/cloud-shuttle/drover-libs v0.2.0
 	github.com/creack/pty v1.1.24
 	github.com/google/go-github/v62 v62.0.0
 	github.com/google/uuid v1.6.0
