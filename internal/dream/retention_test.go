@@ -84,7 +84,7 @@ func TestRetention_ApplyEnvOverrides(t *testing.T) {
 
 	t.Setenv("DROVER_CODE_DREAM_MAX_ENTRIES", "0")
 	t.Setenv("DROVER_CODE_DREAM_MAX_AGE_DAYS", "0")
-	
+
 	r = Retention{MaxEntries: 50, MaxAgeDays: 5} // start non-zero
 	r.ApplyEnvOverrides()
 	if r.MaxEntries != 0 {

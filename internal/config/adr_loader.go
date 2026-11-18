@@ -14,13 +14,13 @@ var adrFileRe = regexp.MustCompile(`^(\d{4})-.+\.md$`)
 
 // ADR is a loaded Architecture Decision Record.
 type ADR struct {
-	ID          string   // e.g. "0001"
-	Title       string
-	Status      string   // Accepted, Superseded, Proposed, …
-	Path        string
-	Supersedes  []string
+	ID           string // e.g. "0001"
+	Title        string
+	Status       string // Accepted, Superseded, Proposed, …
+	Path         string
+	Supersedes   []string
 	SupersededBy string
-	Body        string
+	Body         string
 }
 
 // ADRLoader selects relevant accepted ADRs at an approved base revision.
