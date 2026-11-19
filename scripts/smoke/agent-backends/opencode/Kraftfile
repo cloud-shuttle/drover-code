@@ -1,0 +1,7 @@
+# Smoke-test image for the opencode agent backend on Unikraft Cloud (syd0).
+# Plan: docs/how-to/smoke-test-agent-backends-on-ukc.md
+# Suggested memory: 2048 MiB. Stage first: cp ../smoke.sh .
+spec: v0.6
+runtime: base-compat:latest
+rootfs: ./Dockerfile
+cmd: ["/usr/bin/bash", "/usr/local/bin/smoke.sh"]
