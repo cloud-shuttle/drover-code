@@ -1,0 +1,2 @@
+# smoke.sh is copied into each backend dir at build time (see the plan doc).
+*/smoke.sh
