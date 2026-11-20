@@ -84,6 +84,9 @@ func jobHasLLM(env map[string]string) bool {
 	return false
 }
 
+// waitForWorker is overridable in tests.
+var waitForWorker = ukc.WaitForWorker
+
 // RunOutput is the result of a hosted worker contract run.
 type RunOutput struct {
 	Output string
@@ -132,6 +135,19 @@ func Run(ctx context.Context, in RunInput) (RunOutput, error) {
 
 	if in.DownloadDir != "" {
 		_ = os.RemoveAll(in.DownloadDir)
+	}
+
+	// Watch the instance while waiting for /health so a worker that stops on
+	// boot (missing image, crash) or has no edge route fails in seconds with
+	// the reason, instead of after the full health timeout.
+	if err := waitForWorker(ctx, cfg, inst.UUID, baseURL, token, ukc.BootWatch{
+		MaxWait: 90 * time.Second,
+		OnPhase: func(phase string, elapsed time.Duration) {
+			_ = emitIfPossible(in.OnStreamLine, "status", fmt.Sprintf(`{"message":"worker %s","phase":"worker_%s","elapsed_ms":%d}`, phase, phase, elapsed.Milliseconds()))
+		},
+	}); err != nil {
+		_ = emitIfPossible(in.OnStreamLine, "status", fmt.Sprintf(`{"event":"ukc_instance_lifecycle","phase":"destroyed","uuid":"%s","ended_at":"%s","reason":"error"}`, inst.UUID, time.Now().UTC().Format(time.RFC3339)))
+		return RunOutput{}, fmt.Errorf("workerclient: health check: %w", err)
 	}
 
 	client := workerclient.New(baseURL, token, cfg.HTTPClient)

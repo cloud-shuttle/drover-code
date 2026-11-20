@@ -82,6 +82,11 @@ type Instance struct {
 	ServiceGroup *ServiceGroup `json:"service_group"`
 	PrivateFQDN  string        `json:"private_fqdn"`
 	FQDN         string        `json:"fqdn"`
+	Image        string        `json:"image,omitempty"`
+	// Set once the instance is draining, stopping, stopped or in standby.
+	StopReason *int `json:"stop_reason,omitempty"`
+	StopCode   *int `json:"stop_code,omitempty"`
+	ExitCode   *int `json:"exit_code,omitempty"`
 }
 
 type ServiceGroup struct {

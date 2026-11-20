@@ -3,7 +3,7 @@
 #   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ukc-agent ./cmd/ukc-agent
 #   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o drover-code ./cmd/drover-code
 #   docker build -f cmd/ukc-agent/Dockerfile -t your-registry/ukc-agent:latest .
-FROM --platform=linux/amd64 golang:1.22-alpine AS builder
+FROM --platform=linux/amd64 golang:1.26-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /ukc-agent ./cmd/ukc-agent
