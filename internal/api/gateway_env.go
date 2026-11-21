@@ -8,6 +8,7 @@ import (
 const (
 	EnvGatewayDimAgentJobID = "DROVER_GATEWAY_DIM_AGENT_JOB_ID"
 	EnvGatewayDimCustomerID = "DROVER_GATEWAY_DIM_CUSTOMER_ID"
+	EnvGatewayDimUser       = "DROVER_GATEWAY_DIM_USER"
 	EnvAgentCredential      = "DROVER_AGENT_CREDENTIAL"
 	EnvAnthropicBaseURL     = "ANTHROPIC_BASE_URL"
 )
@@ -37,6 +38,12 @@ func GatewayRequestHeadersFromEnv() map[string]string {
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvGatewayDimCustomerID)); v != "" {
 		out["x-bf-dim-customer-id"] = v
+	}
+	// x-bf-dim-user is not a hosted-worker marker. Cloud sets
+	// DROVER_GATEWAY_DIM_USER from the submitting member's Zitadel subject
+	// whenever it is known.
+	if v := strings.TrimSpace(os.Getenv(EnvGatewayDimUser)); v != "" {
+		out["x-bf-dim-user"] = v
 	}
 	if gatewayMode() {
 		if vk := virtualKeyFromEnv(); vk != "" {
