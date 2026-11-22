@@ -18,7 +18,7 @@ type Config struct {
 	Token         string
 	Metro         string
 	DefaultImage  string
-	APIBaseURL    string // e.g. https://api.fra.unikraft.cloud
+	APIBaseURL    string // e.g. https://api.syd0.unikraft.cloud
 	HTTPClient    *http.Client
 	MaxHealthWait time.Duration
 }
@@ -26,7 +26,7 @@ type Config struct {
 func apiBaseForMetro(metro string) string {
 	metro = strings.TrimSpace(metro)
 	if metro == "" {
-		metro = "fra"
+		metro = DefaultMetro
 	}
 	if strings.HasPrefix(metro, "http://") || strings.HasPrefix(metro, "https://") {
 		metro = strings.TrimRight(metro, "/")

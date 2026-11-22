@@ -136,4 +136,4 @@ register.go gains a call to `ukc.RegisterAll(...)` when UKC credentials are pres
 
 1. **KraftCloud SDK vs raw REST**: Using the raw Unikraft Cloud REST API directly (thin HTTP wrapper) is preferred to avoid a heavy dependency.
 2. **Image distribution**: The `cmd/ukc-agent` binary is bundled inside a standard Dockerfile which also includes `cmd/drover-code` to allow remote agents to execute `drover-code -headless`.
-3. **Credentials config**: `UKC_TOKEN` (and `UKC_METRO`) are fetched directly from the environment inside `NewManagerFromEnv()`.
+3. **Credentials config**: `UKC_TOKEN` (and `UKC_METRO` / `UKC_REGION`) are fetched directly from the environment inside `NewManagerFromEnv()`. When both metro variables are unset, the client defaults to `syd0` (Sydney; it used to default to `fra`).

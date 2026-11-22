@@ -108,3 +108,18 @@ func TestInstanceHTTPSURL_sydneyMetroKeepsFullID(t *testing.T) {
 		t.Fatalf("got %q", u)
 	}
 }
+
+func TestApiBaseForMetro_defaultSydney(t *testing.T) {
+	if got := apiBaseForMetro(""); got != "https://api.syd0.unikraft.cloud" {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := apiBaseForMetro("  "); got != "https://api.syd0.unikraft.cloud" {
+		t.Fatalf("blank = %q", got)
+	}
+	if got := apiBaseForMetro("fra"); got != "https://api.fra.unikraft.cloud" {
+		t.Fatalf("explicit fra = %q", got)
+	}
+	if got := apiBaseForMetro("syd0-plausible-gnu"); got != "https://api.syd0-plausible-gnu.unikraft.cloud" {
+		t.Fatalf("full sydney id = %q", got)
+	}
+}
