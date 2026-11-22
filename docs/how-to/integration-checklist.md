@@ -495,6 +495,7 @@ func TestAgentWithMyTool(t *testing.T) {
 
 **UKC:**
 - [ ] `UKC_TOKEN` (required for cloud tools)
+- [ ] `UKC_METRO` or `UKC_REGION` (optional; default `syd0`, the Sydney metro). Set `https://api.syd0-plausible-gnu.unikraft.cloud` to use the exact Sydney cluster Drover production uses.
 
 ---
 

@@ -18,6 +18,15 @@ import (
 // Override by publishing your own image and setting the env or passing image explicitly.
 const DefaultAgentImage = "index.unikraft.io/cloudshuttle/ukc-agent:latest"
 
+// DefaultMetro is the Unikraft Cloud metro used when UKC_METRO and UKC_REGION
+// are unset. syd0 is the Sydney metro code used across Drover. Production
+// Sydney sets the full origin https://api.syd0-plausible-gnu.unikraft.cloud
+// (set UKC_METRO to that when you need the exact cluster). An explicit
+// UKC_METRO or UKC_REGION still wins, including fra or sin. drover-cloud's
+// own unset fallback is sin when no allowlist is set; Cloud production
+// already points UKC_METRO at the Sydney origin.
+const DefaultMetro = "syd0"
+
 // Manager coordinates registry persistence and Kraft Cloud calls.
 type Manager struct {
 	mu        sync.Mutex
@@ -35,11 +44,11 @@ func MetroFromEnv() string {
 	))
 }
 
-// ResolveMetro normalizes a Kraftcloud metro code (default fra).
+// ResolveMetro normalizes a Kraftcloud metro code (default DefaultMetro).
 func ResolveMetro(metro string) string {
 	metro = strings.TrimSpace(metro)
 	if metro == "" {
-		return "fra"
+		return DefaultMetro
 	}
 	return metro
 }
