@@ -10,9 +10,9 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.2"
@@ -45,12 +45,12 @@ jobs:
 
   quality-gate:
     name: Quality Gate (CRAP)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     needs: test
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: useblacksmith/checkout@v1
 
       - name: Download coverage artefact
         uses: actions/download-artifact@v8
@@ -69,9 +69,9 @@ jobs:
             --limit 10000
 
   fuzz:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.2"
@@ -104,9 +104,9 @@ jobs:
 
   harness-discipline:
     name: Harness discipline
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.2"

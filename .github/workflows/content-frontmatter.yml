@@ -19,10 +19,10 @@ permissions:
 jobs:
   validate-frontmatter:
     name: Validate docs frontmatter
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: useblacksmith/checkout@v1
         with:
           fetch-depth: 0
 
